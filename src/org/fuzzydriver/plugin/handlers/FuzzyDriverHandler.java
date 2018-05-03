@@ -1,30 +1,24 @@
 package org.fuzzydriver.plugin.handlers;
 
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
-import java.util.UUID;
 
 import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
-import org.apache.commons.exec.ExecuteWatchdog;
+import org.apache.commons.exec.ExecuteException;
 import org.apache.commons.lang3.math.NumberUtilsTest;
 import org.apache.commons.text.similarity.LevenshteinDetailedDistance;
 import org.apache.commons.text.similarity.LevenshteinResults;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
-import org.eclipse.core.internal.utils.WrappedRuntimeException;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 
@@ -53,15 +47,12 @@ import org.junit.runner.JUnitCore;
 import org.junit.runner.Request;
 import org.junit.runner.Result;
 
-import net.ricecode.similarity.JaroStrategy;
-import net.ricecode.similarity.JaroWinklerStrategy;
-import net.ricecode.similarity.LevenshteinDistanceStrategy;
-import net.ricecode.similarity.SimilarityStrategy;
-import net.ricecode.similarity.StringSimilarityService;
-import net.ricecode.similarity.StringSimilarityServiceImpl;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.ListMultimap;
 
 import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.MalformedTreeException;
+import org.eclipse.text.edits.TextEdit;
 
 /**
  * Our sample handler extends AbstractHandler, an IHandler base class.
@@ -77,6 +68,8 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	File binInstrumentedDepDir;
 	File kelinciDir = new File(workingDirectory.getAbsolutePath() + "/kelinci-master/instrumentor/build/libs/kelinci.jar");
 	
+	List<String> fuzzedValues = new ArrayList<>();
+	ListMultimap<String, Integer> distanceResults = new ArrayListMultimap<String, Integer>();
 
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
@@ -120,11 +113,9 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			// TODO other file names
 			
 			TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
-			
 			cu.accept(visitor);
 			
 			MethodInvocation oldInvoc = visitor.getFullMethod();
-			
 			System.out.println(oldInvoc.getName().toString());
 			
 			// set up old and new parameters for modification
@@ -132,9 +123,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			System.out.println(oldParam.toString());
 			
 			StringLiteral newParam = ast.newStringLiteral();
-			
-			List<String> fuzzedValues = new ArrayList<String>();
-			
+						
 			// Always try "" and null as input
 			fuzzedValues.add("");
 			fuzzedValues.add(null);
@@ -144,115 +133,89 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				// TODO run tests with "nearest" inputs; store passing and failing
 				// TODO present results as comments? In view?
 				// TODO add annotations that automate determining what test method/method invocation we care about (?)
+				 
+				/*
+				 * RUN INPUT FUZZERS
+				 */
+				
+				String cmdLineArg = oldParam.toString().replaceAll("\"", "");
 				
 				// Python fuzzer
-				String cmdLineArg = oldParam.toString().replaceAll("\"", "");	
-
-				CommandLine py_cmdLine = new CommandLine("./peach-master/fuzz.py");
-				py_cmdLine.addArgument(cmdLineArg);
-				
-				DefaultExecutor py_executor = new DefaultExecutor();
-				
-				py_executor.execute(py_cmdLine);
+				runPythonFuzzer(cmdLineArg);
 				
 				// JS fuzzer
-				CommandLine js_cmdLine = new CommandLine("./fuzzer-test.js");
-				js_cmdLine.addArgument(cmdLineArg);
-				
-				DefaultExecutor js_executor = new DefaultExecutor();				
-				
-				js_executor.execute(js_cmdLine);
-				
+				runJSFuzzer(cmdLineArg);
 				
 				// parse case mutations
-				File caseMutationFile = new File("case-mutations.txt");
-				FileReader caseFileReader = new FileReader(caseMutationFile);
-				BufferedReader caseBR = new BufferedReader(caseFileReader);
-				
-				String caseLine;
-				
-				while ((caseLine = caseBR.readLine()) != null) {
-					fuzzedValues.add(caseLine);
-				}
-				
-				caseFileReader.close();
+				parseCaseMutations();
 				
 				// parse length mutations
-				File lengthMutationFile = new File("length-mutations.txt");
-				FileReader lengthFileReader = new FileReader(lengthMutationFile);
-				BufferedReader lengthBR = new BufferedReader(lengthFileReader);
-				
-				String lengthLine;
-				
-				while ((lengthLine = lengthBR.readLine()) != null	) {
-					fuzzedValues.add(lengthLine);
-				}
-				
-				lengthFileReader.close();
+				parseLengthMutations();
 				
 				// parse other mutations
-				File otherMutationsFile = new File("other-mutations.txt");
-				FileReader otherFileReader = new FileReader(otherMutationsFile);
-				BufferedReader otherBR = new BufferedReader(otherFileReader);
+				parseOtherMutations();
 				
-				String otherLine;
 				
-				while ((otherLine = otherBR.readLine()) != null) {
-					fuzzedValues.add(otherLine);
+				/*
+				 * CHECK FUZZED VALUES FOR DISTANCE
+				 */
+				calculateEditDistance(cmdLineArg);
+				
+				/*
+				 * RUN TESTS
+				 */
+				
+				boolean passed = false;
+				
+				// Run test with ""
+				this.input = fuzzedValues.get(0);
+				
+				
+				
+				
+				// Run test with null
+				
+				
+				// Iterate over "closest" fuzzed values to see if any pass
+				for (String fuzzedValue : distanceResults.keySet()) {
+					
+//					newParam.setLiteralValue(this.input);
+					
+//					// rewrite AST with new param 
+//					rewrite.replace(oldParam, newParam, null);
+//					
+//					TextEdit edits = rewrite.rewriteAST(document, JavaCore.getOptions());
+//					edits.apply(document);
+//
+//					String newSource = document.get();
+//					icu.getBuffer().setContents(newSource);
+
+								
+					// Update classpath with updated project
+//					IPath projectPath = file.getProject().getFullPath();
+//					updateClasspath(projectPath);
+					
+					// Save file
+//					IWorkbenchPage page = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage();
+//					page.saveEditor(editor, true);
+					
+					// run test
+//					runTest(file);
+					
+					System.out.println("Fuzzed value: " + fuzzedValue + " Levenshtein score: " + distanceResults.get(fuzzedValue));
+					
+					
+					
 				}
 				
-				otherBR.close();
-				
-				// Check for most similar fuzzed values (based on number of edits)
-				
-				LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
-				String original = cmdLineArg;
-				
-				List<LevenshteinResults> results = new ArrayList<>();
-				LevenshteinResults result;
-				
-				for (int i=2; i<fuzzedValues.size(); i++) {
-					String s = fuzzedValues.get(i);
-					 result = distanceStrategy.apply(original, s);
-					 
-//					 results.add(result);
-					 
-					 if (result.getDistance() > 0 && result.getDistance() <=4) {						 
-						 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
-					 } else {
-						 System.out.println(s + " has a score greater than 4.");
-					 }
-					 
-					 	
-				}
 				
 				
 			}catch (Exception e) {
 				// TODO: handle exception
 			}
 			
-			// Create input directory and write original output to input file
-//			createInputFile(oldParam.getLiteralValue());
-			
-			// Pass in fuzzed input from file
-//			loadFile("/Users/bjohnson/eclipse-workspace/lang_16_buggy/target/test-classes/org/apache/commons/lang3/math/in_dir/testInput.txt");			
-//			loadFile(workingDirectory + "/org.fuzzydriver.plugin/in_dir/testInput.txt");
-//									
-//			newParam.setLiteralValue(this.input);
-			
-//			// rewrite AST with new param 
-//			 u.getBuffer().setContents(newSource);
-						
-			// Update classpath with updated project
-//			IPath projectPath = file.getProject().getFullPath();
-//			updateClasspath(projectPath);
-			
-			// Save file
-//			IWorkbenchPage page = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage();
-//			page.saveEditor(editor, true);
-			
-			// run test
-//			runTest(file);
+										
+
 
 		} catch (CoreException e) {
 			// TODO Auto-generated catch block
@@ -263,6 +226,84 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		} 
 		
 		return null;
+	}
+
+	private void calculateEditDistance(String cmdLineArg) {
+		LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
+		String original = cmdLineArg;
+		
+		LevenshteinResults result;
+		
+		for (int i=2; i<fuzzedValues.size(); i++) {
+			String s = fuzzedValues.get(i);
+			 result = distanceStrategy.apply(original, s);
+			 
+			 // only add result if > 0 (not the same string) and <= 4 (no more than 4 edits)
+			 if (result.getDistance() > 0 && result.getDistance() <=4) {						 						 
+				 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
+				 distanceResults.put(s,result.getDistance());
+			 }	 	
+		}
+	}
+
+	private void runJSFuzzer(String cmdLineArg) throws ExecuteException, IOException {
+		CommandLine js_cmdLine = new CommandLine("./fuzzer-test.js");
+		js_cmdLine.addArgument(cmdLineArg);
+		
+		DefaultExecutor js_executor = new DefaultExecutor();				
+		
+		js_executor.execute(js_cmdLine);
+	}
+
+	private void runPythonFuzzer(String cmdLineArg) throws ExecuteException, IOException {
+		CommandLine py_cmdLine = new CommandLine("./peach-master/fuzz.py");
+		py_cmdLine.addArgument(cmdLineArg);
+		
+		DefaultExecutor py_executor = new DefaultExecutor();
+		
+		py_executor.execute(py_cmdLine);
+	}
+
+	private void parseOtherMutations() throws FileNotFoundException, IOException {
+		File otherMutationsFile = new File("other-mutations.txt");
+		FileReader otherFileReader = new FileReader(otherMutationsFile);
+		BufferedReader otherBR = new BufferedReader(otherFileReader);
+		
+		String otherLine;
+		
+		while ((otherLine = otherBR.readLine()) != null) {
+			fuzzedValues.add(otherLine);
+		}
+		
+		otherBR.close();
+	}
+
+	private void parseLengthMutations() throws FileNotFoundException, IOException {
+		File lengthMutationFile = new File("length-mutations.txt");
+		FileReader lengthFileReader = new FileReader(lengthMutationFile);
+		BufferedReader lengthBR = new BufferedReader(lengthFileReader);
+		
+		String lengthLine;
+		
+		while ((lengthLine = lengthBR.readLine()) != null	) {
+			fuzzedValues.add(lengthLine);
+		}
+		
+		lengthFileReader.close();
+	}
+
+	private void parseCaseMutations() throws FileNotFoundException, IOException {
+		File caseMutationFile = new File("case-mutations.txt");
+		FileReader caseFileReader = new FileReader(caseMutationFile);
+		BufferedReader caseBR = new BufferedReader(caseFileReader);
+		
+		String caseLine;
+		
+		while ((caseLine = caseBR.readLine()) != null) {
+			fuzzedValues.add(caseLine);
+		}
+		
+		caseFileReader.close();
 	}
 
 	private ASTParser createParser(String source) {
@@ -276,42 +317,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		parser.setSource(source.toCharArray());
 //			parser.setKind(ASTParser.K_COMPILATION_UNIT);
 		return parser;
-	}
-
-	private void createInstrumentedTestDirectory() {
-		binInstrumentedTestDir = new File(workingDirectory + "/lang_16_buggy/target/test-classes/org/apache/commons/lang3/math/bin-instrumented");
-		
-		if (!binInstrumentedTestDir.exists()) {
-			if (binInstrumentedTestDir.mkdir()) {
-				System.out.println("Created instrumented classes directory!");
-			} else {
-				System.out.println("Failed to create instrumented classes directory!");
-			}
-		}
-	}
-	
-	private void createInstrumentedDepDirectory() {
-		binInstrumentedDepDir = new File(workingDirectory + "/lang_16_buggy/target/classes/org/apache/commons/lang3/math/bin-instrumented");
-		
-		if (!binInstrumentedDepDir.exists()) {
-			if (binInstrumentedDepDir.mkdir()) {
-				System.out.println("Created directory for instrumented dependency classes!");
-			} else {
-				System.out.println("Failed to create instrumented dependency classes directory!");
-			}
-		}
-	}
-
-	private void createInputFile(String value) throws IOException {
-
-		inputFile = new File(workingDirectory + "/org.fuzzydriver.plugin/in_dir/testInput.txt");
-		inputFile.createNewFile();
-		
-		FileWriter fw = new FileWriter(inputFile.getAbsoluteFile());
-		BufferedWriter bw = new BufferedWriter(fw);
-		
-		bw.write(value);
-		bw.close();
 	}
 	
 	public void loadFile(String file) {
