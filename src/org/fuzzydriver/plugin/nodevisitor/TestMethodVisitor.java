@@ -12,13 +12,19 @@ import org.eclipse.jdt.core.dom.MethodInvocation;
 public class TestMethodVisitor extends ASTVisitor {
 	
 	public char[] source;
+	
+	
+	// method call of interest
 	public MethodInvocation methOfInterest;
 	public List<?> parameters;
-	public String method;
+	
+	// test method to find
+	public String targetTestMethod;
 
 
-	public TestMethodVisitor (char[] source) {
+	public TestMethodVisitor (char[] source, String targetTestMethod) {
 		this.source = source;
+		this.targetTestMethod = targetTestMethod;
 	}
 	
 	public boolean visit (MethodInvocation node) {
@@ -27,17 +33,11 @@ public class TestMethodVisitor extends ASTVisitor {
 		
 		MethodDeclaration methDec = getMethodDeclaration(node);
 		
-		if (methDec != null) {
-			String method = methDec.getName().getFullyQualifiedName();
-			
-			// TODO: These values should be passed in somehow
-			if (method.equals("testCreateNumber")) {
-				this.method = method;
-				if (methInv.equals("createNumber")) {
-					methOfInterest = node;
-					parameters = node.arguments();
-				}
-
+		if (methDec != null) {			
+			// Lang-16
+			if (methInv.equals("createNumber") && methDec.getName().toString().equals("testCreateNumber")) {
+				methOfInterest = node;
+				parameters = node.arguments();
 			}
 			
 		}
@@ -45,10 +45,6 @@ public class TestMethodVisitor extends ASTVisitor {
 		return true;
 	}
 
-	
-	public String getMethod() {
-		return method;
-	}
 	
 	public List<?> getParameters() {
 		return parameters;

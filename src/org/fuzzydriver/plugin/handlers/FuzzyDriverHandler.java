@@ -4,24 +4,27 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.UUID;
 
+import org.apache.commons.exec.CommandLine;
+import org.apache.commons.exec.DefaultExecutor;
+import org.apache.commons.exec.ExecuteWatchdog;
 import org.apache.commons.lang3.math.NumberUtilsTest;
+import org.apache.commons.text.similarity.LevenshteinDetailedDistance;
+import org.apache.commons.text.similarity.LevenshteinResults;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.core.internal.utils.WrappedRuntimeException;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 
@@ -50,13 +53,15 @@ import org.junit.runner.JUnitCore;
 import org.junit.runner.Request;
 import org.junit.runner.Result;
 
-import edu.cmu.sv.kelinci.Kelinci;
-import edu.cmu.sv.kelinci.instrumentor.Instrumentor;
+import net.ricecode.similarity.JaroStrategy;
+import net.ricecode.similarity.JaroWinklerStrategy;
+import net.ricecode.similarity.LevenshteinDistanceStrategy;
+import net.ricecode.similarity.SimilarityStrategy;
+import net.ricecode.similarity.StringSimilarityService;
+import net.ricecode.similarity.StringSimilarityServiceImpl;
 
-import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.MalformedTreeException;
-import org.eclipse.text.edits.TextEdit;
 
 /**
  * Our sample handler extends AbstractHandler, an IHandler base class.
@@ -97,86 +102,146 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			
 			// Creation of ASTRewrite
 			ASTRewrite rewrite = ASTRewrite.create(ast);
-			
-			// create necessary directory for fuzzer to instrument files
-			createInstrumentedTestDirectory();
-			createInstrumentedDepDirectory();
-			
-			// Prepare classes for fuzzing			
-			// Only working on sub-directory of classes with class of interest (for now) -- optional alternative available in kelinci-master
-			// TODO pass in directory to analyze based on open file location (parent folder); alter "test-classes" --> "classes" for second
-			String targetTestDir = workingDirectory.getAbsolutePath() + "/lang_16_buggy/target/test-classes/org/apache/commons/lang3/math";
-						
-			String[] args = {"-i", targetTestDir, "-o",  binInstrumentedTestDir.getAbsolutePath()};
-			
-			String targetDependencyDir = workingDirectory.getAbsolutePath() + "/lang_16_buggy/target/classes/org/apache/commons/lang3/math";
-			
-			String[] args2 = {"-i", targetDependencyDir, "-o", binInstrumentedDepDir.getAbsolutePath()};
-			
-			Instrumentor.main(args);
-			Instrumentor.main(args2);
-			
-			// start Kelinci server
-			String targetDriverCP = workingDirectory.getAbsolutePath() + "/org.fuzzydriver.plugin/bin/org/fuzzydriver/plugin/handlers/FuzzyDriverHandler";	
-			String[] kelinciArgs = {targetDriverCP, "@@"};
-			
-//			System.out.println(kelinciArgs[0] + " " + kelinciArgs[1]);
-//			
-//			Kelinci.main(kelinciArgs);
-						
-			String startServerCommand = "java -cp " + binInstrumentedTestDir.getAbsolutePath() + ":" + binInstrumentedDepDir.getAbsolutePath() + ":" + kelinciDir.getAbsolutePath() + ":" + targetTestDir + ":" + targetDependencyDir
-					+ " edu.cmu.sv.kelinci.Kelinci " + targetDriverCP + " @@";
-			
-			ProcessBuilder startServer = new ProcessBuilder(startServerCommand);
-			startServer.directory(new File(workingDirectory.getAbsolutePath() + "/kelinci-master/"));
-			
-			Process server = startServer.start();
-			
-			// Make sure server starts
-			server.waitFor();
-			InputStream is = server.getInputStream();
-			BufferedReader br = new BufferedReader(new InputStreamReader(is));
-			String outcome = null;
-			while ((outcome = br.readLine()) != null) {
-				System.out.println(outcome);
-			}
-			is.close();
-			
-			String runInterfaceCommand = "";
-			ProcessBuilder runInterface = new ProcessBuilder(runInterfaceCommand); 
-			runInterface.directory(workingDirectory);			
+				
 			
 			// Find method of interest
-			// TODO pass method to look for into constructor
-			TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray());
+			String targetTestMethod = "";
+			
+			if (file.getName().contains("NumberUtilsTest")) {
+				if (file.getFullPath().toString().contains("lang_16")) {
+					targetTestMethod = "testCreateNumber"; 
+				}
+				else if (file.getFullPath().toString().contains("lang_1_1")) {
+					// TODO 
+				} else {
+					// TODO
+				}
+			} 
+			// TODO other file names
+			
+			TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
 			
 			cu.accept(visitor);
 			
 			MethodInvocation oldInvoc = visitor.getFullMethod();
-	
+			
+			System.out.println(oldInvoc.getName().toString());
+			
 			// set up old and new parameters for modification
 			StringLiteral oldParam = (StringLiteral) oldInvoc.arguments().get(0);
+			System.out.println(oldParam.toString());
+			
 			StringLiteral newParam = ast.newStringLiteral();
 			
+			List<String> fuzzedValues = new ArrayList<String>();
+			
+			// Always try "" and null as input
+			fuzzedValues.add("");
+			fuzzedValues.add(null);
+			
+			try {
+				
+				// TODO run tests with "nearest" inputs; store passing and failing
+				// TODO present results as comments? In view?
+				// TODO add annotations that automate determining what test method/method invocation we care about (?)
+				
+				// Python fuzzer
+				String cmdLineArg = oldParam.toString().replaceAll("\"", "");	
+
+				CommandLine py_cmdLine = new CommandLine("./peach-master/fuzz.py");
+				py_cmdLine.addArgument(cmdLineArg);
+				
+				DefaultExecutor py_executor = new DefaultExecutor();
+				
+				py_executor.execute(py_cmdLine);
+				
+				// JS fuzzer
+				CommandLine js_cmdLine = new CommandLine("./fuzzer-test.js");
+				js_cmdLine.addArgument(cmdLineArg);
+				
+				DefaultExecutor js_executor = new DefaultExecutor();				
+				
+				js_executor.execute(js_cmdLine);
+				
+				
+				// parse case mutations
+				File caseMutationFile = new File("case-mutations.txt");
+				FileReader caseFileReader = new FileReader(caseMutationFile);
+				BufferedReader caseBR = new BufferedReader(caseFileReader);
+				
+				String caseLine;
+				
+				while ((caseLine = caseBR.readLine()) != null) {
+					fuzzedValues.add(caseLine);
+				}
+				
+				caseFileReader.close();
+				
+				// parse length mutations
+				File lengthMutationFile = new File("length-mutations.txt");
+				FileReader lengthFileReader = new FileReader(lengthMutationFile);
+				BufferedReader lengthBR = new BufferedReader(lengthFileReader);
+				
+				String lengthLine;
+				
+				while ((lengthLine = lengthBR.readLine()) != null	) {
+					fuzzedValues.add(lengthLine);
+				}
+				
+				lengthFileReader.close();
+				
+				// parse other mutations
+				File otherMutationsFile = new File("other-mutations.txt");
+				FileReader otherFileReader = new FileReader(otherMutationsFile);
+				BufferedReader otherBR = new BufferedReader(otherFileReader);
+				
+				String otherLine;
+				
+				while ((otherLine = otherBR.readLine()) != null) {
+					fuzzedValues.add(otherLine);
+				}
+				
+				otherBR.close();
+				
+				// Check for most similar fuzzed values (based on number of edits)
+				
+				LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
+				String original = cmdLineArg;
+				
+				List<LevenshteinResults> results = new ArrayList<>();
+				LevenshteinResults result;
+				
+				for (int i=2; i<fuzzedValues.size(); i++) {
+					String s = fuzzedValues.get(i);
+					 result = distanceStrategy.apply(original, s);
+					 
+//					 results.add(result);
+					 
+					 if (result.getDistance() > 0 && result.getDistance() <=4) {						 
+						 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
+					 } else {
+						 System.out.println(s + " has a score greater than 4.");
+					 }
+					 
+					 	
+				}
+				
+				
+			}catch (Exception e) {
+				// TODO: handle exception
+			}
+			
 			// Create input directory and write original output to input file
-			createInputFile(oldParam.getLiteralValue());
+//			createInputFile(oldParam.getLiteralValue());
 			
 			// Pass in fuzzed input from file
 //			loadFile("/Users/bjohnson/eclipse-workspace/lang_16_buggy/target/test-classes/org/apache/commons/lang3/math/in_dir/testInput.txt");			
-			loadFile(workingDirectory + "/org.fuzzydriver.plugin/in_dir/testInput.txt");
-									
-			newParam.setLiteralValue(this.input);
+//			loadFile(workingDirectory + "/org.fuzzydriver.plugin/in_dir/testInput.txt");
+//									
+//			newParam.setLiteralValue(this.input);
 			
 //			// rewrite AST with new param 
-			rewrite.replace(oldParam, newParam, null);
-//			
-			TextEdit edits = rewrite.rewriteAST(document, JavaCore.getOptions());
-			edits.apply(document);
-
-			String newSource = document.get();
-			icu.getBuffer().setContents(newSource);
-			
-			
+//			 u.getBuffer().setContents(newSource);
 						
 			// Update classpath with updated project
 //			IPath projectPath = file.getProject().getFullPath();
@@ -193,18 +258,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (MalformedTreeException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadLocationException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InterruptedException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} 
@@ -250,18 +303,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	}
 
 	private void createInputFile(String value) throws IOException {
-//		File inputDir = new File("/Users/bjohnson/eclipse-workspace/lang_16_buggy/target/test-classes/org/apache/commons/lang3/math/in_dir");
-//		
-//		if (!inputDir.exists()) {
-//			if (inputDir.mkdir()) {				
-//				System.out.println("Created input directory!");
-//			} else {
-//				System.out.println("Failed to create input directory!");
-//			}
-//		}
-		
-		// create and populate input file
-//		inputFile = new File(inputDir + "/" + "testInput.txt");
+
 		inputFile = new File(workingDirectory + "/org.fuzzydriver.plugin/in_dir/testInput.txt");
 		inputFile.createNewFile();
 		
