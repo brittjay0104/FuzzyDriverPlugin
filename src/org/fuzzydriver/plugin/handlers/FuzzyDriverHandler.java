@@ -49,6 +49,7 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import org.fuzzydriver.plugin.nodevisitor.TestMethodVisitor;
 import org.fuzzydriver.plugin.util.Test;
 import org.fuzzydriver.plugin.util.Util;
+import org.junit.experimental.theories.ParametersSuppliedBy;
 import org.junit.runner.JUnitCore;
 import org.junit.runner.Request;
 import org.junit.runner.Result;
@@ -86,8 +87,8 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	
 	Test targetTest;
 	
-	List<String> passingTests;
-	List<String> failingTests;
+	List<String> passingTests = new ArrayList<>();
+	List<String> failingTests = new ArrayList<>();
 	
 	List<String> fuzzedValues = new ArrayList<>();
 	ListMultimap<String, Integer> distanceResults = new ArrayListMultimap<String, Integer>();
@@ -148,7 +149,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				 * RUN INPUT FUZZERS
 				 */
 				
-				String cmdLineArg = oldParam.toString().replaceAll("\"", "");
+				String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
 				
 				// Python fuzzer
 				runPythonFuzzer(cmdLineArg);
@@ -181,7 +182,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 				
 				
-				// **** Run test with "" ****
+				// **** Run test with "" (only save if passes?) ****
 				this.input = fuzzedValues.get(0);
 				
 				// update and save page
@@ -190,26 +191,24 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				
 				// wait for build to finish before running test
 				TimeUnit.SECONDS.sleep(2);
-				
 				runTest(testFile);				
 				
 				
-//				// **** Run test with null ****
-//				
-//				// Update current "old" method param from current document source 
-//				updateASTParser(testDocument.get());
-//				getMethodParameter(testDocument.get(), targetTestMethod, false);
-//				
-//				this.input = fuzzedValues.get(1);
-//				
-//				// update and save page
-//				updateTestInput();
-//				savePage(page);
-//				
-//				// wait for build to finish before running test
-//				TimeUnit.SECONDS.sleep(2);
-//				
-//				runTest(testFile);
+				// **** Run test with null (only save if passes?) ****
+				
+				// Update current "old" method param from current document source 
+				this.input = fuzzedValues.get(1);
+				
+				updateASTParser(testDocument.get());
+				getMethodParameter(testDocument.get(), targetTestMethod, false);
+				
+				// update and save page
+				updateTestInput();
+				savePage(page);
+				
+				// wait for build to finish before running test
+				TimeUnit.SECONDS.sleep(2);
+				runTest(testFile);
 				
 				
 				// Iterate over "closest" fuzzed values to see if any pass
@@ -217,14 +216,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 					
 //					this.input = fuzzedValue;
 //					updateTestInput();
-								
-					// Update classpath with updated project
-//					IPath projectPath = file.getProject().getFullPath();
-//					updateClasspath(projectPath);
-					
-					// Save file
-//					IWorkbenchPage page = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage();
-//					page.saveEditor(editor, true);
 					
 					// run test
 //					runTest(file);	
@@ -396,48 +387,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		return parser;
 	}
 	
-	public void loadFile(String file) {
-		try {
-			inputFile = new File(file);
-			FileReader fr = new FileReader(inputFile);
-			BufferedReader br = new BufferedReader(fr);
-//			StringBuffer sb = new StringBuffer();
-			
-			if ((input = br.readLine()) != null) {
-				System.out.println(input);
-			}
-			
-			fr.close();
-			
-			
-		} catch (IOException e) {
-			
-		}
-	
-	}
-	
-	public void updateClasspath(IPath path) {
-		IProject pluginProject = ResourcesPlugin.getWorkspace().getRoot().getProject("org.fuzzydriver.plugin");
-		IClasspathEntry updatedProject = JavaCore.newProjectEntry(path);
-		
-		if (pluginProject != null) {
-			System.out.println(pluginProject.getName());
-			
-			try {
-				IJavaProject javaProject = (IJavaProject) pluginProject.getNature(JavaCore.NATURE_ID);
-				IClasspathEntry[] rawClasspath = javaProject.getRawClasspath();
-				List<IClasspathEntry> classpathList = new LinkedList(java.util.Arrays.asList(rawClasspath));
-				
-				for (IClasspathEntry item:classpathList) {
-					System.out.println(item.getPath().toString());
-				}
-				
-			} catch (CoreException e) {
-				
-			}
-		}	
-	}
-	
 	public void runTest(IFile file) {
 		
 		Class testClass = findClass(file);
@@ -451,6 +400,13 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			
 			if (result != null) {			
 				Util.printResult(result);
+				
+				// save tests based on whether they passed on failed
+				if (result.getFailureCount() == 0) {
+					passingTests.add(targetTest.getFullTest());
+				} else {
+					failingTests.add(targetTest.getFullTest());
+				}
 			}
 		} else {
 			System.out.println("Could not create class file!");
@@ -484,57 +440,5 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		}
 				
 		return null;
-	}
-	
-	/**
-	 *
-	 * Returns a string that stores the contents of the file passed in.
-	 *
-	 * @param filename
-	 * @return
-	 */
-	
-	public static String readFiletoString(String filename) {
-		StringBuffer sb = new StringBuffer();
-		for(String s: readFile(filename))
-		{
-			sb.append(s);
-			sb.append("\n");
-		}
-		return sb.toString();
-
-	}
-	
-	/**
-	 *
-	 * Helper method for readFileToString (reads file to List of Strings)
-	 *
-	 * @param file (String)
-	 * @return
-	 */
-	
-	public static List<String> readFile(String file) {
-		List<String> retList = new ArrayList<String>();
-		BufferedReader br = null;
-		try {
-			br = new BufferedReader(new FileReader(file));
-			String line;
-			while ((line = br.readLine()) != null) {
-				retList.add(line);
-			}
-		} catch (Exception e) {
-			retList = new ArrayList<String>();
-			e.printStackTrace();
-		} finally {
-			if (br != null) {
-				try {
-					br.close();
-				} catch (IOException e) {
-					retList = new ArrayList<String>();
-					e.printStackTrace();
-				}
-			}
-		}
-		return retList;
 	}
 }
