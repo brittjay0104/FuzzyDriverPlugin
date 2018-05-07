@@ -29,6 +29,7 @@ import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
 import org.eclipse.jdt.core.dom.CompilationUnit;
@@ -38,7 +39,9 @@ import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.IEditorReference;
 import org.eclipse.ui.IFileEditorInput;
+import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
@@ -50,6 +53,7 @@ import org.junit.runner.Result;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
+import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
 import org.eclipse.text.edits.MalformedTreeException;
 import org.eclipse.text.edits.TextEdit;
@@ -66,7 +70,15 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	public File workingDirectory = new File ("/Users/bjohnson/eclipse-workspace/");
 	File binInstrumentedTestDir;
 	File binInstrumentedDepDir;
-	File kelinciDir = new File(workingDirectory.getAbsolutePath() + "/kelinci-master/instrumentor/build/libs/kelinci.jar");
+	
+	IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
+	IFile testFile;
+	Document testDocument;
+	ICompilationUnit icu;
+	AST ast;
+	
+	StringLiteral oldParam;
+	StringLiteral newParam;
 	
 	List<String> fuzzedValues = new ArrayList<>();
 	ListMultimap<String, Integer> distanceResults = new ArrayListMultimap<String, Integer>();
@@ -74,37 +86,34 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
 		IWorkbenchWindow window = HandlerUtil.getActiveWorkbenchWindowChecked(event);
+		IWorkbenchPage page = window.getActivePage();
 		
-		IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
-		
+		// File of interest
 		IEditorInput input = editor.getEditorInput();
-		IFile file = ((IFileEditorInput)input).getFile();
+		testFile = ((IFileEditorInput)input).getFile();		
 		
-		ICompilationUnit icu = JavaCore.createCompilationUnitFrom(file);
+		icu = JavaCore.createCompilationUnitFrom(testFile);
 		
 		try {
 			// creation of document containing source code			
 			String source = icu.getSource();			 
-			Document document = new Document(source);
+			testDocument = new Document(source);
 			
 			// create and set up ASTParser
 			ASTParser parser = createParser(source);
 			
 			CompilationUnit cu = (CompilationUnit) parser.createAST(null);
-			AST ast = cu.getAST();
-			
-			// Creation of ASTRewrite
-			ASTRewrite rewrite = ASTRewrite.create(ast);
+			ast = cu.getAST();
 				
 			
 			// Find method of interest
 			String targetTestMethod = "";
 			
-			if (file.getName().contains("NumberUtilsTest")) {
-				if (file.getFullPath().toString().contains("lang_16")) {
+			if (testFile.getName().contains("NumberUtilsTest")) {
+				if (testFile.getFullPath().toString().contains("lang_16")) {
 					targetTestMethod = "testCreateNumber"; 
 				}
-				else if (file.getFullPath().toString().contains("lang_1_1")) {
+				else if (testFile.getFullPath().toString().contains("lang_1_1")) {
 					// TODO 
 				} else {
 					// TODO
@@ -112,17 +121,8 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			} 
 			// TODO other file names
 			
-			TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
-			cu.accept(visitor);
-			
-			MethodInvocation oldInvoc = visitor.getFullMethod();
-			System.out.println(oldInvoc.getName().toString());
-			
-			// set up old and new parameters for modification
-			StringLiteral oldParam = (StringLiteral) oldInvoc.arguments().get(0);
-			System.out.println(oldParam.toString());
-			
-			StringLiteral newParam = ast.newStringLiteral();
+			// get parameter of interest
+			getMethodParameter(source, cu, targetTestMethod);
 						
 			// Always try "" and null as input
 			fuzzedValues.add("");
@@ -159,37 +159,37 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				/*
 				 * CHECK FUZZED VALUES FOR DISTANCE
 				 */
-				calculateEditDistance(cmdLineArg);
+				calculateEditDistanceResults(cmdLineArg);
 				
 				/*
 				 * RUN TESTS
 				 */
 				
-				boolean passed = false;
+				boolean passed = false;				
 				
 				// Run test with ""
 				this.input = fuzzedValues.get(0);
 				
+				updateTestInput();
 				
+				savePage(page);
 				
+//				 run test
+				runTest(testFile);				
 				
 				// Run test with null
+				this.input = fuzzedValues.get(1);
+				
+				updateTestInput();
+				
+				savePage(page);
 				
 				
 				// Iterate over "closest" fuzzed values to see if any pass
 				for (String fuzzedValue : distanceResults.keySet()) {
 					
-//					newParam.setLiteralValue(this.input);
-					
-//					// rewrite AST with new param 
-//					rewrite.replace(oldParam, newParam, null);
-//					
-//					TextEdit edits = rewrite.rewriteAST(document, JavaCore.getOptions());
-//					edits.apply(document);
-//
-//					String newSource = document.get();
-//					icu.getBuffer().setContents(newSource);
-
+//					this.input = fuzzedValue;
+//					updateTestInput();
 								
 					// Update classpath with updated project
 //					IPath projectPath = file.getProject().getFullPath();
@@ -200,11 +200,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 //					page.saveEditor(editor, true);
 					
 					// run test
-//					runTest(file);
-					
-					System.out.println("Fuzzed value: " + fuzzedValue + " Levenshtein score: " + distanceResults.get(fuzzedValue));
-					
-					
+//					runTest(file);	
 					
 				}
 				
@@ -228,7 +224,49 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		return null;
 	}
 
-	private void calculateEditDistance(String cmdLineArg) {
+	private void savePage(IWorkbenchPage page) {
+		for (IEditorPart dirtyPage: page.getDirtyEditors()) {
+			dirtyPage.doSave(null);
+			System.out.println("Editor saved!");
+		}
+	}
+
+	private void getMethodParameter(String source, CompilationUnit cu, String targetTestMethod) {
+		TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
+		cu.accept(visitor);
+		
+		MethodInvocation testMethodInvoc = visitor.getFullMethod();
+		System.out.println(testMethodInvoc.getName().toString());
+		
+		// set up old and new parameters for modification
+		oldParam = (StringLiteral) testMethodInvoc.arguments().get(0);
+		System.out.println(oldParam.toString());
+		
+		newParam = ast.newStringLiteral();
+	}
+
+	private String updateTestInput()
+			throws BadLocationException, JavaModelException {
+		
+		newParam.setLiteralValue(this.input);
+		
+		// Creation of ASTRewrite
+		ASTRewrite rewrite = ASTRewrite.create(ast);
+		
+		// rewrite AST with new param 
+		rewrite.replace(oldParam, newParam, null);
+		
+		TextEdit edits = rewrite.rewriteAST(testDocument, JavaCore.getOptions());
+		edits.apply(testDocument);
+		
+		String newSource = testDocument.get();
+		icu.getBuffer().setContents(newSource);
+		
+		return newSource;
+
+	}
+
+	private void calculateEditDistanceResults(String cmdLineArg) {
 		LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
 		String original = cmdLineArg;
 		
@@ -240,7 +278,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			 
 			 // only add result if > 0 (not the same string) and <= 4 (no more than 4 edits)
 			 if (result.getDistance() > 0 && result.getDistance() <=4) {						 						 
-				 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
+//				 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
 				 distanceResults.put(s,result.getDistance());
 			 }	 	
 		}
@@ -363,13 +401,50 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	
 	public void runTest(IFile file) {
 		
-		JUnitCore jUnitCore = new JUnitCore();
-		Request request = Request.method(NumberUtilsTest.class, "testCreateNumber");
+		Class testClass = findClass(file);
 		
-		Result result = jUnitCore.run(request);
+		if (testClass != null) {
+			
+			JUnitCore jUnitCore = new JUnitCore();
+			Request request = Request.method(testClass, "testCreateNumber");
+			
+			Result result = jUnitCore.run(request);
+			
+			if (result != null) {			
+				Util.printResult(result);
+			}
+		} else {
+			System.out.println("Could not create class file!");
+		}
+	}
+	
+	/**
+	 * Returns null if can't find class.
+	 */
+	private Class findClass (IFile file) {
+		// get file name 
+		String filename = file.getName();
 		
-		Util.printResult(result);
+		// get package name
+		String path = file.getFullPath().toString();
+		String fullPackage = path.replaceAll("\\/", ".");
+		String targetPackage = fullPackage.substring(fullPackage.indexOf("org"), fullPackage.length()-5);
+				
+		// create class from package
+		Class targetClass;
 		
+		try {
+			
+			targetClass = Class.forName(targetPackage);
+			
+			return targetClass;
+			
+		} catch (ClassNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+				
+		return null;
 	}
 	
 	/**
