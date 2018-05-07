@@ -1,4 +1,4 @@
-package org.fuzzydriver.plugin.handlers;
+package org.fuzzydriver.plugin.util;
 
 import org.junit.runner.Result;
 

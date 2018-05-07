@@ -6,6 +6,7 @@ import java.util.List;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Expression;
+import org.eclipse.jdt.core.dom.ExpressionStatement;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.MethodInvocation;
 
@@ -20,6 +21,9 @@ public class TestMethodVisitor extends ASTVisitor {
 	
 	// test method to find
 	public String targetTestMethod;
+	
+	// full test statement (for tool output)
+	public String fullTest;
 
 
 	public TestMethodVisitor (char[] source, String targetTestMethod) {
@@ -36,6 +40,14 @@ public class TestMethodVisitor extends ASTVisitor {
 		if (methDec != null) {			
 			// Lang-16
 			if (methInv.equals("createNumber") && methDec.getName().toString().equals("testCreateNumber")) {
+				
+				// get full test statement for tool output
+				ExpressionStatement fullTest = findFullTest(node);
+				
+				if (fullTest != null) {
+					this.fullTest = fullTest.toString();				
+				}
+				
 				methOfInterest = node;
 				parameters = node.arguments();
 			}
@@ -43,6 +55,18 @@ public class TestMethodVisitor extends ASTVisitor {
 		}
 		
 		return true;
+	}
+	
+	private ExpressionStatement findFullTest(ASTNode node) {
+		if (node.getParent() != null) {
+			return node instanceof ExpressionStatement ? (ExpressionStatement)node : findFullTest(node.getParent());
+		}
+		
+		return null;
+	}
+	
+	public String getFullTest() {
+		return fullTest;
 	}
 
 	

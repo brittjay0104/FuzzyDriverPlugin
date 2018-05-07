@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
@@ -46,6 +47,8 @@ import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
 import org.fuzzydriver.plugin.nodevisitor.TestMethodVisitor;
+import org.fuzzydriver.plugin.util.Test;
+import org.fuzzydriver.plugin.util.Util;
 import org.junit.runner.JUnitCore;
 import org.junit.runner.Request;
 import org.junit.runner.Result;
@@ -76,9 +79,15 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	Document testDocument;
 	ICompilationUnit icu;
 	AST ast;
+	CompilationUnit cu;
+	ASTParser parser;
 	
 	StringLiteral oldParam;
-	StringLiteral newParam;
+	
+	Test targetTest;
+	
+	List<String> passingTests;
+	List<String> failingTests;
 	
 	List<String> fuzzedValues = new ArrayList<>();
 	ListMultimap<String, Integer> distanceResults = new ArrayListMultimap<String, Integer>();
@@ -90,7 +99,10 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		
 		// File of interest
 		IEditorInput input = editor.getEditorInput();
-		testFile = ((IFileEditorInput)input).getFile();		
+		testFile = ((IFileEditorInput)input).getFile();
+		
+		// create test object
+		targetTest = new Test(testFile.getName());
 		
 		icu = JavaCore.createCompilationUnitFrom(testFile);
 		
@@ -100,11 +112,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			testDocument = new Document(source);
 			
 			// create and set up ASTParser
-			ASTParser parser = createParser(source);
-			
-			CompilationUnit cu = (CompilationUnit) parser.createAST(null);
-			ast = cu.getAST();
-				
+			updateASTParser(source);
 			
 			// Find method of interest
 			String targetTestMethod = "";
@@ -112,6 +120,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			if (testFile.getName().contains("NumberUtilsTest")) {
 				if (testFile.getFullPath().toString().contains("lang_16")) {
 					targetTestMethod = "testCreateNumber"; 
+					targetTest.setTestMethod(targetTestMethod);
 				}
 				else if (testFile.getFullPath().toString().contains("lang_1_1")) {
 					// TODO 
@@ -119,10 +128,11 @@ public class FuzzyDriverHandler extends AbstractHandler {
 					// TODO
 				}
 			} 
-			// TODO other file names
+			// TODO other file name
 			
 			// get parameter of interest
-			getMethodParameter(source, cu, targetTestMethod);
+			boolean first = true;
+			getMethodParameter(source, targetTestMethod, first);
 						
 			// Always try "" and null as input
 			fuzzedValues.add("");
@@ -132,7 +142,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				
 				// TODO run tests with "nearest" inputs; store passing and failing
 				// TODO present results as comments? In view?
-				// TODO add annotations that automate determining what test method/method invocation we care about (?)
+				// TODO add annotations that automate determining what test method/method invocation we care about (Ask Yuriy?)
 				 
 				/*
 				 * RUN INPUT FUZZERS
@@ -165,24 +175,41 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				 * RUN TESTS
 				 */
 				
-				boolean passed = false;				
+				System.out.println("\nTest file: " + targetTest.getFilename());
+				System.out.println("Test method: " + targetTest.getTestMethod());
+				System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
+				System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 				
-				// Run test with ""
+				
+				// **** Run test with "" ****
 				this.input = fuzzedValues.get(0);
 				
-				updateTestInput();
-				
+				// update and save page
+				updateTestInput();			
 				savePage(page);
 				
-//				 run test
+				// wait for build to finish before running test
+				TimeUnit.SECONDS.sleep(2);
+				
 				runTest(testFile);				
 				
-				// Run test with null
-				this.input = fuzzedValues.get(1);
 				
-				updateTestInput();
-				
-				savePage(page);
+//				// **** Run test with null ****
+//				
+//				// Update current "old" method param from current document source 
+//				updateASTParser(testDocument.get());
+//				getMethodParameter(testDocument.get(), targetTestMethod, false);
+//				
+//				this.input = fuzzedValues.get(1);
+//				
+//				// update and save page
+//				updateTestInput();
+//				savePage(page);
+//				
+//				// wait for build to finish before running test
+//				TimeUnit.SECONDS.sleep(2);
+//				
+//				runTest(testFile);
 				
 				
 				// Iterate over "closest" fuzzed values to see if any pass
@@ -224,6 +251,13 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		return null;
 	}
 
+	private void updateASTParser(String source) {
+		parser = createParser(source);
+		
+		cu = (CompilationUnit) parser.createAST(null);
+		ast = cu.getAST();
+	}
+
 	private void savePage(IWorkbenchPage page) {
 		for (IEditorPart dirtyPage: page.getDirtyEditors()) {
 			dirtyPage.doSave(null);
@@ -231,24 +265,29 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		}
 	}
 
-	private void getMethodParameter(String source, CompilationUnit cu, String targetTestMethod) {
+	private void getMethodParameter(String source, String targetTestMethod, boolean first) {
 		TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
 		cu.accept(visitor);
 		
 		MethodInvocation testMethodInvoc = visitor.getFullMethod();
-		System.out.println(testMethodInvoc.getName().toString());
+		targetTest.setFullTest(visitor.getFullTest());
 		
 		// set up old and new parameters for modification
 		oldParam = (StringLiteral) testMethodInvoc.arguments().get(0);
-		System.out.println(oldParam.toString());
+		System.out.println("Old parameter: " +  oldParam.toString());
 		
-		newParam = ast.newStringLiteral();
+		if (first) {
+			targetTest.setOriginalParameter(oldParam.toString());
+		} 
 	}
 
 	private String updateTestInput()
 			throws BadLocationException, JavaModelException {
 		
+		// create component with new param value 
+		StringLiteral newParam = ast.newStringLiteral();
 		newParam.setLiteralValue(this.input);
+		targetTest.setNewParameter(newParam.toString());
 		
 		// Creation of ASTRewrite
 		ASTRewrite rewrite = ASTRewrite.create(ast);
