@@ -1,31 +1,58 @@
 package org.fuzzydriver.plugin.handlers;
 
+import static org.junit.Assert.fail;
+
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.jar.Attributes;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
+
+import javax.xml.transform.stax.StAXSource;
 
 import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
 import org.apache.commons.exec.ExecuteException;
-import org.apache.commons.lang3.math.NumberUtilsTest;
+import org.apache.commons.exec.PumpStreamHandler;
 import org.apache.commons.text.similarity.LevenshteinDetailedDistance;
 import org.apache.commons.text.similarity.LevenshteinResults;
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
 import org.eclipse.core.commands.ExecutionException;
+import org.eclipse.core.internal.resources.Workspace;
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
-
+import org.eclipse.core.resources.IProjectNature;
+import org.eclipse.core.resources.IResource;
+import org.eclipse.core.resources.IWorkspace;
+import org.eclipse.core.resources.IWorkspaceRoot;
+import org.eclipse.core.resources.IncrementalProjectBuilder;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.NullProgressMonitor;
+import org.eclipse.core.runtime.Path;
 import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaProject;
@@ -38,9 +65,11 @@ import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.MethodInvocation;
 import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
+import org.eclipse.jdt.ui.jarpackager.IJarExportRunnable;
+import org.eclipse.jdt.ui.jarpackager.JarPackageData;
+import org.eclipse.jdt.ui.jarpackager.JarWriter3;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
-import org.eclipse.ui.IEditorReference;
 import org.eclipse.ui.IFileEditorInput;
 import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchWindow;
@@ -49,16 +78,15 @@ import org.eclipse.ui.handlers.HandlerUtil;
 import org.fuzzydriver.plugin.nodevisitor.TestMethodVisitor;
 import org.fuzzydriver.plugin.util.Test;
 import org.fuzzydriver.plugin.util.Util;
-import org.junit.experimental.theories.ParametersSuppliedBy;
 import org.junit.runner.JUnitCore;
-import org.junit.runner.Request;
 import org.junit.runner.Result;
+import org.junit.runner.notification.Failure;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.ListMultimap;
 
+import org.eclipse.jface.dialogs.ProgressMonitorDialog;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.text.edits.MalformedTreeException;
 import org.eclipse.text.edits.TextEdit;
 
@@ -72,6 +100,8 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	public File inputFile;
 	public String input;
 	public File workingDirectory = new File ("/Users/bjohnson/eclipse-workspace/");
+	private IWorkspace workspace = ResourcesPlugin.getWorkspace();
+	
 	File binInstrumentedTestDir;
 	File binInstrumentedDepDir;
 	
@@ -83,24 +113,40 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	CompilationUnit cu;
 	ASTParser parser;
 	
+	JarWriter3 jarWriter;
+	
 	StringLiteral oldParam;
 	
 	Test targetTest;
+	IProject targetProject;
 	
-	List<String> passingTests = new ArrayList<>();
-	List<String> failingTests = new ArrayList<>();
+	List<IFile> filesToExport;
 	
-	List<String> fuzzedValues = new ArrayList<>();
-	ListMultimap<String, Integer> distanceResults = new ArrayListMultimap<String, Integer>();
+	List<String> passingTests;
+	List<String> failingTests;
+	
+	List<String> fuzzedValues;
+//	ListMultimap<String, Integer> distanceResults;
+	List<String> distanceResults;
 
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
+		filesToExport = new ArrayList<>();
+		passingTests = new ArrayList<>();
+		failingTests = new ArrayList<>();
+		fuzzedValues = new ArrayList<>();
+		
+		distanceResults = new ArrayList<String>();
+		
 		IWorkbenchWindow window = HandlerUtil.getActiveWorkbenchWindowChecked(event);
 		IWorkbenchPage page = window.getActivePage();
 		
 		// File of interest
 		IEditorInput input = editor.getEditorInput();
 		testFile = ((IFileEditorInput)input).getFile();
+		
+		// project of interest
+		
 		
 		// create test object
 		targetTest = new Test(testFile.getName());
@@ -122,6 +168,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				if (testFile.getFullPath().toString().contains("lang_16")) {
 					targetTestMethod = "testCreateNumber"; 
 					targetTest.setTestMethod(targetTestMethod);
+					targetTest.setProjectName("lang_16_buggy");
 				}
 				else if (testFile.getFullPath().toString().contains("lang_1_1")) {
 					// TODO 
@@ -141,7 +188,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			
 			try {
 				
-				// TODO run tests with "nearest" inputs; store passing and failing
 				// TODO present results as comments? In view?
 				// TODO add annotations that automate determining what test method/method invocation we care about (Ask Yuriy?)
 				 
@@ -181,48 +227,98 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
 				System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 				
+				File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
 				
-				// **** Run test with "" (only save if passes?) ****
+				// **** Run test with "" ****
+
 				this.input = fuzzedValues.get(0);
-				
+							
 				// update and save page
 				updateTestInput();			
 				savePage(page);
 				
 				// wait for build to finish before running test
 				TimeUnit.SECONDS.sleep(2);
-				runTest(testFile);				
+				
+				// D4J compile
+				d4jCompile(executorDirectory); 
+				
+				// D4J test (see Terminal for how to run single test)
+				d4jTest(executorDirectory);
+				
+				// TODO check if passed or failed (command output after ":")
+				
+//				String pathToJar = targetDirectory + "/" + targetTest.getProjectName()+".jar";
+//				
+//				runTest(pathToJar);	
 				
 				
 				// **** Run test with null (only save if passes?) ****
 				
-				// Update current "old" method param from current document source 
-				this.input = fuzzedValues.get(1);
+				// TODO: see if can get this working -- maybe with NullLiteral?
 				
-				updateASTParser(testDocument.get());
-				getMethodParameter(testDocument.get(), targetTestMethod, false);
+//				// Update current "old" method param from current document source 
+//				this.input = fuzzedValues.get(1);
+//				
+//				updateASTParser(testDocument.get());
+//				getMethodParameter(testDocument.get(), targetTestMethod, false);
+//				
+//				// update and save page
+//				updateTestInput();
+//				savePage(page);
+//				
+//				// wait for build to finish before running test
+//				TimeUnit.SECONDS.sleep(2);
+//				runTest(testFile);
 				
-				// update and save page
-				updateTestInput();
-				savePage(page);
-				
-				// wait for build to finish before running test
-				TimeUnit.SECONDS.sleep(2);
-				runTest(testFile);
-				
+//				System.out.println(distanceResults.size());
 				
 				// Iterate over "closest" fuzzed values to see if any pass
-				for (String fuzzedValue : distanceResults.keySet()) {
-					
+				
+//				this.input = distanceResults.get(0);
+//				System.out.println(this.input);
+//				
+//				updateASTParser(testDocument.get());
+//				getMethodParameter(testDocument.get(), targetTestMethod, false);
+//				
+//				updateTestInput();
+//				savePage(page);
+//				
+//				TimeUnit.SECONDS.sleep(2);
+//				
+//				// delete existing jar before making new one
+//				deleteOldJar(targetDirectory, targetTest.getProjectName()+".jar");
+//				// TODO add identifier (number from loop?) to then come back and loop through/load for running tests
+//				jarTargetProject(targetDirectory, targetTest.getProjectName()+".jar");
+//				refreshWorkspace();
+//				
+//				runTest(testFile, targetDirectory + "/" + targetTest.getProjectName()+".jar");
+				
+				
+//				for (String fuzzedValue : distanceResults) {
+//					System.out.println(fuzzedValue);
 //					this.input = fuzzedValue;
+//					
+//					updateASTParser(testDocument.get());
+//					getMethodParameter(testDocument.get(), targetTestMethod, false);
+//					
 //					updateTestInput();
-					
-					// run test
-//					runTest(file);	
-					
-				}
-				
-				
+//					savePage(page);
+//					
+//					TimeUnit.SECONDS.sleep(2);
+//					
+////					// delete existing jar before making new one
+//					deleteOldJar(targetDirectory, targetTest.getProjectName()+".jar");
+//					refreshWorkspace();
+//					System.out.println("Workspace refreshed!");
+//					
+//					jarTargetProject(targetDirectory, targetTest.getProjectName()+".jar");
+//					refreshWorkspace();
+//					System.out.println("Workspace refreshed!");
+//					
+//					runTest(testFile);
+//													
+//				}
 				
 			}catch (Exception e) {
 				// TODO: handle exception
@@ -241,6 +337,66 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		
 		return null;
 	}
+
+	private void d4jTest(File executorDirectory) throws ExecuteException, IOException {
+		// Store output to know if test passed or failed
+		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+		PumpStreamHandler streamHandler = new PumpStreamHandler(outputStream);
+		
+		CommandLine d4j_test_cmdLine = new CommandLine("/Users/bjohnson/Documents/Research_2017-2018/defects4j/framework/bin/defects4j");
+		d4j_test_cmdLine.addArgument("test");
+		d4j_test_cmdLine.addArgument("-t");
+		
+		// get package name
+		String path = testFile.getFullPath().toString();
+		String fullPackage = path.replaceAll("\\/", ".");
+		String targetPackage = fullPackage.substring(fullPackage.indexOf("org"), fullPackage.length()-5);
+		String singleTest = targetPackage + "::" + targetTest.getTestMethod();
+		
+		d4j_test_cmdLine.addArgument(singleTest);
+		
+		
+		DefaultExecutor d4j_test_executor = new DefaultExecutor();		
+		d4j_test_executor.setWorkingDirectory(executorDirectory);
+		d4j_test_executor.setStreamHandler(streamHandler);		
+		d4j_test_executor.execute(d4j_test_cmdLine);
+		
+		System.out.println("Output = " + outputStream.toString());
+		
+		// Store test in appropriate list
+		if (outputStream.toString().contains("Failing Tests: 0")) {
+			passingTests.add(targetTest.getFullTest());
+		} else {
+			failingTests.add(targetTest.getFullTest());
+		}
+		
+		
+	}
+
+	private void d4jCompile(File workingDirectory) throws ExecuteException, IOException {
+		CommandLine d4j_compile_cmdLine = new CommandLine("/Users/bjohnson/Documents/Research_2017-2018/defects4j/framework/bin/defects4j");
+		d4j_compile_cmdLine.addArgument("compile");
+		
+		DefaultExecutor d4j_compile_executor = new DefaultExecutor();		
+		d4j_compile_executor.setWorkingDirectory(workingDirectory);		
+		
+		d4j_compile_executor.execute(d4j_compile_cmdLine);
+	}
+	
+	private void addFiles(IResource[] resources) throws CoreException{
+		
+		for (IResource resource : resources) {
+			if (resource instanceof IFile) {
+				filesToExport.add((IFile)resource);
+			}
+			else {
+				IFolder folder = (IFolder) resource;
+				IResource[] nestedResources = folder.members();
+				addFiles(nestedResources);				
+			}
+		}
+	}
+	
 
 	private void updateASTParser(String source) {
 		parser = createParser(source);
@@ -278,7 +434,10 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		// create component with new param value 
 		StringLiteral newParam = ast.newStringLiteral();
 		newParam.setLiteralValue(this.input);
+		
 		targetTest.setNewParameter(newParam.toString());
+	
+		System.out.println("New parameter: " + targetTest.getNewParameter());
 		
 		// Creation of ASTRewrite
 		ASTRewrite rewrite = ASTRewrite.create(ast);
@@ -305,11 +464,12 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		for (int i=2; i<fuzzedValues.size(); i++) {
 			String s = fuzzedValues.get(i);
 			 result = distanceStrategy.apply(original, s);
+//			 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
 			 
 			 // only add result if > 0 (not the same string) and <= 4 (no more than 4 edits)
-			 if (result.getDistance() > 0 && result.getDistance() <=4) {						 						 
-//				 System.out.println("Fuzzed value: " + s + "     " + "Levenshtein score: " + result.getDistance());
-				 distanceResults.put(s,result.getDistance());
+			 if (result.getDistance() ==1) {	
+//				 System.out.println(fuzzedValues.get(i) + " distance = " + result.getDistance());
+				 distanceResults.add(s);
 			 }	 	
 		}
 	}
@@ -387,43 +547,78 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		return parser;
 	}
 	
-	public void runTest(IFile file) {
+	public void runTest(String pathToJar) throws IOException, ClassNotFoundException {
 		
-		Class testClass = findClass(file);
+		String filename = testFile.getName().substring(0, testFile.getName().length()-5);
 		
-		if (testClass != null) {
+		if (pathToJar != null && testFile != null) {
+			JarFile jarFile = new JarFile(pathToJar);
+			Enumeration<JarEntry> e = jarFile.entries();
 			
-			JUnitCore jUnitCore = new JUnitCore();
-			Request request = Request.method(testClass, "testCreateNumber");
+			URL[] urls  = {new URL("jar:file:" + pathToJar+"!/")};
+			for (URL url : urls) {
+				System.out.println(url.toExternalForm());
+			}
 			
-			Result result = jUnitCore.run(request);
+			URLClassLoader cl = URLClassLoader.newInstance(urls);
 			
-			if (result != null) {			
-				Util.printResult(result);
-				
-				// save tests based on whether they passed on failed
-				if (result.getFailureCount() == 0) {
-					passingTests.add(targetTest.getFullTest());
-				} else {
-					failingTests.add(targetTest.getFullTest());
+			while (e.hasMoreElements()) {
+				JarEntry je = e.nextElement();
+				if (je.isDirectory() || !je.getName().endsWith(".class")) {
+					continue;
+				}
+				// -6 because of .class
+				if (je.getName().contains(filename)) {
+					String className = je.getName().substring(0, je.getName().length()-6);
+					className = className.replace('/', '.');
+					System.out.println(className);
+					Class testClass = cl.loadClass(className);
+					
+					if (testClass != null) {
+						
+						JUnitCore jUnitCore = new JUnitCore();
+						
+						Result result = jUnitCore.run(testClass);
+						for (Failure f: result.getFailures()) {
+							System.out.println(f.getTestHeader() + " failed!");
+							System.out.println(f.getMessage());
+						}
+						
+//						Request request = Request.method(testClass, "testCreateNumber");
+//						Result result = jUnitCore.run(request);
+						
+						if (result != null) {			
+							Util.printResult(result);
+							
+							// save tests based on whether they passed on failed
+							if (result.getFailureCount() == 0) {
+								passingTests.add(targetTest.getFullTest());
+							} else {
+								failingTests.add(targetTest.getFullTest());
+							}
+						}
+
+					} else {
+						System.out.println("Could not create class file!");
+					}
+					
 				}
 			}
-		} else {
-			System.out.println("Could not create class file!");
+			jarFile.close();
 		}
+
 	}
 	
 	/**
 	 * Returns null if can't find class.
 	 */
 	private Class findClass (IFile file) {
-		// get file name 
-		String filename = file.getName();
 		
 		// get package name
 		String path = file.getFullPath().toString();
 		String fullPackage = path.replaceAll("\\/", ".");
 		String targetPackage = fullPackage.substring(fullPackage.indexOf("org"), fullPackage.length()-5);
+
 				
 		// create class from package
 		Class targetClass;

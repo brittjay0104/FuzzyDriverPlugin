@@ -7,6 +7,7 @@ public class Test {
 	String newParameter;
 	String testMethod;
 	String fullTest;
+	String projectName;
 	boolean passed;
 	
 	public Test(String fname) {
@@ -29,6 +30,7 @@ public class Test {
 	
 	public void setNewParameter(String param) {
 		newParameter = param;
+
 	}
 
 	public void setTestMethod(String method) {
@@ -37,6 +39,10 @@ public class Test {
 	
 	public void setFullTest(String test) {
 		fullTest = test;
+	}
+	
+	public void setProjectName(String name) {
+		projectName = name;
 	}
 	
 	public boolean getPassed() {
@@ -61,6 +67,10 @@ public class Test {
 	
 	public String getFilename() {
 		return filename;
+	}
+	
+	public String getProjectName() {
+		return projectName;
 	}
 
 }
