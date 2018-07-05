@@ -6,6 +6,7 @@ public class Test {
 	String originalParameter;
 	String newParameter;
 	String testMethod;
+	String originalTest;
 	String fullTest;
 	String projectName;
 	boolean passed;
@@ -26,6 +27,10 @@ public class Test {
 	
 	public void setOriginalParameter(String param) {
 		originalParameter = param;
+	}
+	
+	public void setOriginalTest(String test) {
+		originalTest = test;
 	}
 	
 	public void setNewParameter(String param) {
@@ -51,6 +56,10 @@ public class Test {
 	
 	public String getOriginalParameter() {
 		return originalParameter;
+	}
+	
+	public String getOriginalTest() {
+		return originalTest;
 	}
 	
 	public String getNewParameter() {

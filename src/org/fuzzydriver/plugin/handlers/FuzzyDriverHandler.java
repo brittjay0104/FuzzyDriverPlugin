@@ -15,6 +15,8 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -71,18 +73,23 @@ import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTParser;
+import org.eclipse.jdt.core.dom.BooleanLiteral;
+import org.eclipse.jdt.core.dom.CharacterLiteral;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 
 import org.eclipse.jdt.core.dom.MethodInvocation;
 import org.eclipse.jdt.core.dom.NullLiteral;
+import org.eclipse.jdt.core.dom.NumberLiteral;
 import org.eclipse.jdt.core.dom.SimpleName;
 import org.eclipse.jdt.core.dom.StringLiteral;
+import org.eclipse.jdt.core.dom.Type;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.dom.VariableDeclarationStatement;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.ui.jarpackager.IJarExportRunnable;
 import org.eclipse.jdt.ui.jarpackager.JarPackageData;
 import org.eclipse.jdt.ui.jarpackager.JarWriter3;
+import org.eclipse.ui.IEditorActionDelegate;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.IFileEditorInput;
@@ -94,6 +101,7 @@ import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
 import org.eclipse.ui.progress.UIJob;
+import org.eclipse.ui.texteditor.ITextEditor;
 import org.fuzzydriver.plugin.nodevisitor.TestMethodVisitor;
 import org.fuzzydriver.plugin.util.Test;
 import org.fuzzydriver.plugin.util.Util;
@@ -101,11 +109,12 @@ import org.fuzzydriver.plugin.views.FuzzyDriverView;
 import org.junit.runner.JUnitCore;
 import org.junit.runner.Result;
 import org.junit.runner.notification.Failure;
-
-
+import org.eclipse.jface.action.IAction;
 import org.eclipse.jface.dialogs.ProgressMonitorDialog;
 import org.eclipse.jface.text.BadLocationException;
 import org.eclipse.jface.text.Document;
+import org.eclipse.jface.text.ITextSelection;
+import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.text.edits.MalformedTreeException;
@@ -119,7 +128,7 @@ import org.eclipse.text.edits.TextEdit;
 public class FuzzyDriverHandler extends AbstractHandler {
 	
 	public File inputFile;
-	public String input;
+	public Object input;
 	public File workingDirectory = new File ("/Users/bjohnson/eclipse-workspace/");
 	
 	File binInstrumentedTestDir;
@@ -133,9 +142,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	AST ast;
 	CompilationUnit cu;
 	ASTParser parser;
-	
-	JarWriter3 jarWriter;
-	
+		
 	Object currentParam;
 	
 	Test targetTest;
@@ -148,6 +155,8 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	
 	List<String> fuzzedValues;
 	List<String> distanceResults;
+	
+	File outputFile;
 
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException {
@@ -158,6 +167,12 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		
 		distanceResults = new ArrayList<String>();
 		
+		// write passing and failing tests to file (for view to read from)
+		outputFile = new File(workingDirectory.getPath()+"/fuzzy-output.txt");
+		if (outputFile.exists()) {
+			outputFile.delete();					
+		}
+		
 		IWorkbenchWindow window = HandlerUtil.getActiveWorkbenchWindowChecked(event);
 		IWorkbenchPage page = window.getActivePage();
 		
@@ -165,8 +180,13 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		IEditorInput input = editor.getEditorInput();
 		testFile = ((IFileEditorInput)input).getFile();
 		
-		// project of interest
-		
+		// get selected method
+		if (editor instanceof ITextEditor) {
+			ITextEditor editor = (ITextEditor)this.editor;
+			String selectedMethod = getSelectedText(editor);
+			
+			System.out.println(selectedMethod);
+		}
 		
 		// create test object
 		targetTest = new Test(testFile.getName());
@@ -263,7 +283,13 @@ public class FuzzyDriverHandler extends AbstractHandler {
 				System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
 				System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 				
+				// write original test to file to pipe to view later
+				writeOriginalTestToFile(workingDirectory.getPath()+"/fuzzy-output.txt");
+				
+				
 				File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
+				
+				// TODO invoke tracer plugin from command line
 				
 				
 				// **** Run test with "" ****	
@@ -279,9 +305,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 						this.input = distanceResults.get(i);
 						runTests(page, executorDirectory);
 						TimeUnit.SECONDS.sleep(2);						
-						System.out.println("Done!");
-					} 
-					
+					}
 				}
 				
 				System.out.println("PASSING TESTS");
@@ -294,11 +318,6 @@ public class FuzzyDriverHandler extends AbstractHandler {
 					System.out.println(test);
 				}
 				
-				// write passing and failing tests to file (for view to read from)
-				File outputFile = new File(workingDirectory.getPath()+"/fuzzy-output.txt");
-				if (outputFile.exists()) {
-					outputFile.delete();					
-				}
 				
 				writeOutputFile(workingDirectory.getPath()+"/fuzzy-output.txt");
 				
@@ -322,6 +341,48 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		} 
 		
 		return null;
+	}
+	
+	private ITextSelection getSelection(ITextEditor editor) {
+	     ISelection selection = editor.getSelectionProvider()
+	            .getSelection();
+	     return (ITextSelection) selection;
+	}
+
+	private String getSelectedText(ITextEditor editor) {
+	     return getSelection(editor).getText();
+	}
+	
+	private void writeOriginalTestToFile(String filename) {
+		BufferedWriter bw = null;
+		FileWriter fw = null;
+		
+		try {
+			fw = new FileWriter(filename);
+			bw = new BufferedWriter(fw);
+			
+			bw.write("ORIGINAL TEST INPUT\n");
+			
+			bw.write("O: " + targetTest.getOriginalParameter());
+			bw.write("\n");
+			
+			
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} finally {
+			try {
+				if (bw != null)
+					bw.close();
+
+				if (fw != null)
+					fw.close();
+
+			} catch (IOException ex) {
+				ex.printStackTrace();
+			}
+		}
+		
 	}
 	
 	private void writeOutputFile(String filename) {
@@ -422,8 +483,11 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		DefaultExecutor d4j_test_executor = new DefaultExecutor();		
 		d4j_test_executor.setWorkingDirectory(executorDirectory);	
 		d4j_test_executor.setStreamHandler(streamHandler);
+		
+		
 		try {
 			d4j_test_executor.execute(d4j_test_cmdLine);
+			
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -462,8 +526,16 @@ public class FuzzyDriverHandler extends AbstractHandler {
 	}
 
 	private void getMethodParameter(String source, String targetTestMethod, boolean first) {
-		TestMethodVisitor visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod);
-		cu.accept(visitor);
+		TestMethodVisitor visitor;
+		if (first) {
+			visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod, true);
+			targetTest.setOriginalTest(visitor.getOriginalTest());
+			
+		} else {
+			visitor = new TestMethodVisitor(source.toCharArray(), targetTestMethod, false);
+		}
+		
+		cu.accept(visitor);		
 		
 		MethodInvocation testMethodInvoc = visitor.getFullMethod();
 		if (visitor.getTestStatements() == null) {			
@@ -477,7 +549,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 			// if not hard coded string, get the variable declaration with value
 			currentParam = visitor.getDeclOfInterest();	
 		} else {
-			currentParam = (StringLiteral) testMethodInvoc.arguments().get(0);							
+			currentParam = visitor.getParamOfInterest();							
 		}
 		
 		System.out.println("Current parameter = " + currentParam.toString());
@@ -489,7 +561,11 @@ public class FuzzyDriverHandler extends AbstractHandler {
 								
 				targetTest.setOriginalParameter(originalParam);
 			} else {
-				targetTest.setOriginalParameter(currentParam.toString());				
+				if (currentParam == null) {
+					targetTest.setOriginalParameter("null");
+				} else {
+					targetTest.setOriginalParameter(currentParam.toString());									
+				}
 			}
 		} 
 		
@@ -501,42 +577,195 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		// Creation of ASTRewrite
 		ASTRewrite rewrite = ASTRewrite.create(ast);
 		String newSource = null;
-		StringLiteral newParam = ast.newStringLiteral();
-					
-//		if (this.input == null) {
-//			// TODO handle null value for this.input	(Null Literal)
-//			NullLiteral nullParam = ast.newNullLiteral();
-//			targetTest.setNewParameter(null);
-//		}
 		
-		if (currentParam instanceof StringLiteral) {
-			// create component with new param value 
-			newSource = replaceStringLiteral(rewrite, newParam);			
+		
+		if (currentParam instanceof VariableDeclarationStatement) {
+			VariableDeclarationStatement stmt = (VariableDeclarationStatement) currentParam;
+			
+			String type = stmt.getType().toString();
+			
+			if (type.equals("boolean")) {
+				BooleanLiteral newParam;
+				
+				if ((boolean) currentParam) {
+					newParam = ast.newBooleanLiteral(false);					
+				} else {
+					newParam = ast.newBooleanLiteral(true);
+				}
+				
+				newSource = replaceVariableDeclaration(rewrite, newParam, type);
+				
+			} else if (type.equals("String")) {
+				StringLiteral newParam = ast.newStringLiteral();
+				newSource = replaceVariableDeclaration(rewrite, newParam, type);
+				
+			} else if (type.equals("int") || type.equals("float") || type.equals("double")|| type.equals("short")
+					|| type.equals("long")) {
+				NumberLiteral newParam = ast.newNumberLiteral();
+				newSource = replaceVariableDeclaration(rewrite, newParam, type);
+				
+			}
+				
 		} else {
-			// parameter is a variable declaration
-			newSource = replaceVariableDeclaration(rewrite, newParam);
+			
+			replaceASTLiteral(rewrite);
 		}
 		
 		return newSource;
 
 	}
-
-	private String replaceVariableDeclaration(ASTRewrite rewrite, StringLiteral newParam)
+	
+	private String replaceASTLiteral(ASTRewrite rewrite)
 			throws BadLocationException, JavaModelException {
-		String newSource;
-		newParam.setLiteralValue(this.input);
 		
+		String newSource = "";
+		
+		// handle each primitive type accordingly
+		if (currentParam instanceof StringLiteral) {
+			StringLiteral oldParam = (StringLiteral)currentParam;
+			StringLiteral newParam = ast.newStringLiteral();
+			
+			if (this.input == null) {
+				// TODO is this right?
+				newParam.setLiteralValue("null");
+			} else {
+				newParam.setLiteralValue(this.input.toString());								
+			}
+			
+			targetTest.setNewParameter(newParam.toString());
+			rewrite.replace(oldParam, newParam, null);	
+			
+		} else if (currentParam instanceof BooleanLiteral	) {
+			BooleanLiteral oldParam = (BooleanLiteral)currentParam;
+			BooleanLiteral newParam;
+			
+			if ((boolean) currentParam) {
+				newParam = ast.newBooleanLiteral(false);
+			} else {
+				newParam = ast.newBooleanLiteral(true);
+			}
+			
+		} else if (currentParam instanceof CharacterLiteral) {
+			CharacterLiteral oldParam = (CharacterLiteral)currentParam;
+			CharacterLiteral newParam = ast.newCharacterLiteral();
+			
+			if (this.input == null) {
+				// TODO handle if null
+			} else {
+				newParam.setCharValue((char)this.input);				
+			}
+			
+			rewrite.replace(oldParam, newParam, null);
+		} else if (currentParam instanceof NumberLiteral) {
+			NumberLiteral oldParam = (NumberLiteral)currentParam;
+			NumberLiteral param = ast.newNumberLiteral();
+			
+			if (this.input == null) {
+				// TOOD is this right?
+				param.setToken("null");
+			} else {
+				param.setToken(this.input.toString());				
+			}
+			
+			rewrite.replace(oldParam, param, null);
+		}
+
+		
+		TextEdit edits = rewrite.rewriteAST(testDocument, JavaCore.getOptions());
+		edits.apply(testDocument);
+		
+		newSource = testDocument.get();
+		icu.getBuffer().setContents(newSource);
+		
+		return newSource;
+	}
+
+	private String replaceVariableDeclaration(ASTRewrite rewrite, Object newParam, String type)
+			throws BadLocationException, JavaModelException {
+
+		// Old variable fragments
+		VariableDeclarationStatement oldVarDec = (VariableDeclarationStatement) currentParam;
+		VariableDeclarationFragment frag = (VariableDeclarationFragment) oldVarDec.fragments().get(0);
+		SimpleName varName = frag.getName();
+		
+		// new variable fragments
+		String newSource = "";
 		VariableDeclarationFragment newVarFrag = ast.newVariableDeclarationFragment();
-		SimpleName newVarName = ast.newSimpleName("input");
-		newVarFrag.setName(newVarName);
-		newVarFrag.setInitializer(newParam);
+		newVarFrag.setName(varName);
 		
 		targetTest.setNewParameter(newParam.toString());
-		
-		VariableDeclarationStatement oldVarDec = (VariableDeclarationStatement) currentParam;
 
+		// new variable declaration statement based on fragment
+		// TODO: is this in the wrong location?
 		VariableDeclarationStatement newVarDec = ast.newVariableDeclarationStatement(newVarFrag);
-		newVarDec.setType(ast.newSimpleType(ast.newSimpleName("String")));
+		
+		// determine which type of parameter passed in
+		if (newParam instanceof BooleanLiteral) {
+			// already has value if boolean
+			BooleanLiteral param = (BooleanLiteral)newParam;
+			newVarFrag.setInitializer(param);			
+			
+			newVarDec.setType(ast.newSimpleType(ast.newSimpleName("boolean")));
+			
+		} else if (newParam instanceof StringLiteral) {
+			StringLiteral param = (StringLiteral)newParam;
+			if (this.input == null) {
+				// TODO should this be actual null value or the string "null"?
+				param.setLiteralValue("null");
+				
+			} else {
+				param.setLiteralValue(this.input.toString());				
+			}
+			
+			newVarFrag.setInitializer(param);
+			newVarDec.setType(ast.newSimpleType(ast.newSimpleName("String")));
+			
+		} else if (newParam instanceof CharacterLiteral) {
+			CharacterLiteral param = (CharacterLiteral)newParam;
+			if (this.input == null) {
+				// TODO: figure out how to do this (if possible)
+			} else {
+				param.setCharValue((char)this.input);				
+			}
+			
+			newVarFrag.setInitializer(param);
+			newVarDec.setType(ast.newSimpleType(ast.newSimpleName("char")));
+			
+		} else if (newParam instanceof NumberLiteral) {
+			
+			if (this.input == null) {
+				// TODO handle if null
+			} else {
+				NumberLiteral param = (NumberLiteral)newParam;
+				
+				if (this.input == null) {
+					// TODO handle if null
+				} else {
+					param.setToken(this.input.toString());					
+				}
+				
+				newVarFrag.setInitializer(param);
+				
+				if (type.equals("int")) {
+					newVarDec.setType(ast.newSimpleType(ast.newSimpleName("int")));
+					
+				} else if (type.equals("float")) {
+					newVarDec.setType(ast.newSimpleType(ast.newSimpleName("float")));
+					
+				} else if (type.equals("double")) {
+					newVarDec.setType(ast.newSimpleType(ast.newSimpleName("double")));
+					
+				} else if (type.equals("short")) {
+					newVarDec.setType(ast.newSimpleType(ast.newSimpleName("short")));
+					
+				} else if (type.equals("long")) {
+					newVarDec.setType(ast.newSimpleType(ast.newSimpleName("long")));
+					
+				}
+				
+			}
+			
+		}
 		
 		rewrite.replace(oldVarDec, newVarDec, null);
 		
@@ -545,25 +774,7 @@ public class FuzzyDriverHandler extends AbstractHandler {
 		
 		newSource = testDocument.get();
 		icu.getBuffer().setContents(newSource);
-		return newSource;
-	}
-
-	private String replaceStringLiteral(ASTRewrite rewrite, StringLiteral newParam)
-			throws BadLocationException, JavaModelException {
-		String newSource;
-		newParam.setLiteralValue(this.input);
 		
-		targetTest.setNewParameter(newParam.toString());
-		
-		// rewrite AST with new param 
-		StringLiteral oldParam = (StringLiteral) currentParam;
-		rewrite.replace(oldParam, newParam, null);
-		
-		TextEdit edits = rewrite.rewriteAST(testDocument, JavaCore.getOptions());
-		edits.apply(testDocument);
-		
-		newSource = testDocument.get();
-		icu.getBuffer().setContents(newSource);
 		return newSource;
 	}
 
@@ -663,5 +874,4 @@ public class FuzzyDriverHandler extends AbstractHandler {
 //			parser.setKind(ASTParser.K_COMPILATION_UNIT);
 		return parser;
 	}
-	
 }

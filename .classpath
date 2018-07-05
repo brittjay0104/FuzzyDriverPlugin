@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
+	<classpathentry exported="true" kind="lib" path="lib/org.eclipse.ui.workbench.texteditor-3.3.2.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/commons-text-1.0.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/lang_16_buggy.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/org.eclipse.jdt.ui_3.5.2.r352_v20100106-0800.jar"/>
@@ -14,5 +15,6 @@
 	<classpathentry kind="lib" path="/Users/bjohnson/eclipse-workspace/org.fuzzydriver.plugin/lib/google-collect-0.5.jar"/>
 	<classpathentry kind="lib" path="/Users/bjohnson/eclipse-workspace/org.fuzzydriver.plugin/lib/org.eclipse.jdt.ui_3.5.2.r352_v20100106-0800.jar"/>
 	<classpathentry kind="lib" path="/Users/bjohnson/eclipse-workspace/org.fuzzydriver.plugin/lib/intrace-agent.jar"/>
+	<classpathentry kind="lib" path="/Users/bjohnson/eclipse-workspace/org.fuzzydriver.plugin/lib/org.eclipse.ui.workbench.texteditor-3.3.2.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

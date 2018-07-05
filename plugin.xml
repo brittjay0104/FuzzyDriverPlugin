@@ -14,6 +14,7 @@
             id="org.fuzzydriver.plugin.commands.runFuzzyDriver">
       </command>
    </extension>
+   
    <extension
    		point="org.eclipse.ui.views">
    		<view id="org.fuzzydriver.plugin.views.FuzzyDriverView"
@@ -21,6 +22,7 @@
    			class="org.fuzzydriver.plugin.views.FuzzyDriverView"
    			icon="icons/sample.png"/>
    </extension>
+   
    <extension
          point="org.eclipse.ui.handlers">
       <handler
@@ -37,6 +39,21 @@
             schemeId="org.eclipse.ui.defaultAcceleratorConfiguration">
       </key>
    </extension>
+   
+   <extension point="org.eclipse.ui.popupMenus"> 
+	   	<viewerContribution 
+	      	id="org.eclipse.ui.articles.action.contribution.popup.navigator"
+	   		targetID="#CompilationUnitEditorContext"> 
+	      	<action
+	      		class="org.fuzzydriver.plugin.actions.FuzzyDriverAction"
+	      		id=""
+	      		label="Run Fuzzy Driver"
+	      		icon="icons/holmes.png"
+	      		menubarPath="additions">
+	      	</action>
+	   	</viewerContribution>
+	</extension>
+	
    <extension
          point="org.eclipse.ui.menus">
       <menuContribution
@@ -59,7 +76,7 @@
             <command
                   commandId="org.fuzzydriver.plugin.commands.runFuzzyDriver"
                   icon="icons/sample.png"
-                  tooltip="Say hello world"
+                  tooltip="Run Fuzzy Driver"
                   id="org.fuzzydriver.plugin.toolbars.runFuzzyDriver">
             </command>
          </toolbar>
