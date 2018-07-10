@@ -6,6 +6,7 @@ public class Test {
 	String originalParameter;
 	String newParameter;
 	String testMethod;
+	String targetMethod;
 	String originalTest;
 	String fullTest;
 	String projectName;
@@ -40,6 +41,14 @@ public class Test {
 
 	public void setTestMethod(String method) {
 		testMethod = method;
+	}
+	
+	public void setTargetMethod(String method) {
+		targetMethod = method;
+	}
+	
+	public String getTargetMethod(){
+		return targetMethod;
 	}
 	
 	public void setFullTest(String test) {

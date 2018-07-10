@@ -93,33 +93,74 @@ public class FuzzyDriverView extends ViewPart {
 		 html.append("<body style=\"background-color:white;\"><hr>");
 		 
 		
-		File output = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output.txt");
-		if (output.exists()) {
+		 File originalOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-original.txt");
+		File passingOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-passing.txt");
+		File failingOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-failing.txt");
+		
+		if (originalOutput.exists()) {
 			try {
-				BufferedReader br = new BufferedReader(new FileReader(output));
+				BufferedReader br = new BufferedReader(new FileReader(originalOutput));
 				
 				String line = null;
-				html.append("<h1>Original Test</h1>");
+				
+				html.append("<h2> Original Failing Test</h2>");
+				while ((line=br.readLine()) != null) {
+					if (line.startsWith("O:")){
+						html.append("<font face='Monaco' size='2'>"+line.substring(line.indexOf("O:")+2, line.length())+"</font>");
+						html.append("<br>");
+					} else {
+						html.append("<font face='Monaco' size='2'>"+line+"</font>");
+						html.append("<br>");
+					}
+				}
+				
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+		}
+		
+		if (passingOutput.exists()) {
+			try {
+				BufferedReader br = new BufferedReader(new FileReader(passingOutput));
+				
+				String line = null;
+				
+				html.append("<h2>Passing Tests</h2>");
+					
+				while ((line=br.readLine()) != null) {
+					if (line.startsWith("P:")) {
+						html.append("<font face='Monaco' size='2'>" +line.substring(line.indexOf("P:")+2, line.length())+"</font>");
+						html.append("<br>");
+					} else {
+						html.append("<font face='Monaco' size='2'>"+line+"</font>");
+						html.append("<br>");
+					}
+				}
+			} catch (FileNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		
+		if (failingOutput.exists()) {
+			try {
+				BufferedReader br = new BufferedReader(new FileReader(failingOutput));
+				
+				String line = null;
+				
+				html.append("<h2>Failing Tests</h2>");
 				while ((line = br.readLine()) != null) {
 					
-					if (line.startsWith("O:")) {
-						html.append(line.substring(line.indexOf("O:"), line.length()));
-						html.append("<br>");
-					}
-					
-					if (line.startsWith("P:")) {
-						if (html.indexOf("<h1>Passing Tests</h1>") == -1) {
-							html.append("<h1>Passing Tests</h1>");
-						}
-						html.append(line.substring(line.indexOf("P:"), line.length()));
-						html.append("<br>");
-					}
-					
 					if (line.startsWith("F:")) {
-						if (html.indexOf("<h1>Failing Tests</h1>") == -1) {
-							html.append("<h1>Failing Tests</h1>");
-						}
-						html.append(line.substring(line.indexOf("F:"), line.length()));
+						html.append("<font face='Monaco' size='2'>"+line.substring(line.indexOf("F:")+2, line.length())+"</font>");
+						html.append("<br>");
+					} else {
+						html.append("<font face='Monaco' size='2'>"+line+"</font>");
 						html.append("<br>");
 					}
 				}

@@ -39,6 +39,8 @@ public class TestMethodVisitor extends ASTVisitor {
 	
 	// test method to find
 	public String targetTestMethod;
+	// method call of interest in target test method
+	public String targetMethod;
 	
 	// full test statement (for tool output)
 	public String fullTest;
@@ -52,18 +54,20 @@ public class TestMethodVisitor extends ASTVisitor {
 	// list of statements in test
 	String testStatements;
 
+	public TestMethodVisitor() {
+		
+	}
 
-	public TestMethodVisitor (char[] source, String targetTestMethod, boolean original) {
+	public TestMethodVisitor (char[] source, String targetMethod, String targetTestMethod, boolean original) {
 		this.source = source;
 		this.targetTestMethod = targetTestMethod;
+		this.targetMethod = targetMethod;
 		declarations = new ArrayList<>();
 		originalTest = original;
 	}
 	
-	public boolean visit(CharacterLiteral node) {
-		
-		CharacterLiteral num = node;
-		
+	public boolean visit (VariableDeclarationStatement node) {
+		declarations.add(node);
 		
 		return true;
 	}
@@ -73,13 +77,10 @@ public class TestMethodVisitor extends ASTVisitor {
 		String methInv = node.getName().getFullyQualifiedName();
 		
 		MethodDeclaration methDec = getMethodDeclaration(node);
+		String methodName = methDec.getName().toString();
 		
 		if (methDec != null) {			
-			// Lang-16
-			if (methInv.equals("createNumber") && methDec.getName().toString().equals("testCreateNumber") 
-					|| methInv.equals("createNumber") && methDec.getName().toString().equals("TestLang747")
-					|| methInv.equals("abbreviate") && methDec.getName().toString().equals("testAbbreviate") 
-					|| methInv.equals("escapeJava") && methDec.getName().toString().equals("testEscapeJavaWithSlash")) {
+			if (methInv.equals(targetMethod) && methodName.equals(targetTestMethod)) {
 				
 				methOfInterest = node;
 				
@@ -128,13 +129,13 @@ public class TestMethodVisitor extends ASTVisitor {
 					}
 					
 					if (node.arguments().get(0) instanceof StringLiteral || node.arguments().get(0) instanceof CharacterLiteral) {
-						paramOfInterest = node.arguments().get(0).toString();				
+						paramOfInterest = node.arguments().get(0);				
 						
 					} else if (node.arguments().get(0) instanceof NumberLiteral) {
 						// handle numbers
 						NumberLiteral numParam = (NumberLiteral) node.arguments().get(0);
 						
-						paramOfInterest = numParam.getToken();
+						paramOfInterest = numParam;
 						
 					} else if (node.arguments().get(0) instanceof BooleanLiteral	) {
 						BooleanLiteral boolParam = (BooleanLiteral) node.arguments().get(0);
@@ -190,6 +191,14 @@ public class TestMethodVisitor extends ASTVisitor {
 	
 	public MethodInvocation getFullMethod() {
 		return methOfInterest;
+	}
+	
+	public String getTargetTestMethod() {
+		return targetTestMethod;
+	}
+	
+	public String getTargetMethod() {
+		return targetMethod;
 	}
 	
 	protected String findSourceForNode(ASTNode node) {
