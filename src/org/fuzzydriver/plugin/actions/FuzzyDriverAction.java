@@ -68,7 +68,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	
 	public File inputFile;
 	public Object input;
-	public File workingDirectory = new File ("/Users/bjohnson/eclipse-workspace/");
+	public File workingDirectory = new File ("/Users/bjohnson/Documents/oxy-workspace/");
 	
 	File binInstrumentedTestDir;
 	File binInstrumentedDepDir;
@@ -133,7 +133,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		ITextSelection selection = getSelection(editor);
 		String selectedMethod = selection.getText();
 
-		System.out.println(selectedMethod);
+		System.out.println("The method under test is: " + selectedMethod);
 		
 		// create test object
 		targetTest = new Test(testFile.getName());
@@ -158,7 +158,8 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			IJavaElement selectedElement =  root.getElementAt(selectionOffset);
 			
 			String targetTestMethod = selectedElement.getElementName();
-				
+			
+							
 			
 			// pass target method into visitor to get test method and other relevant parts 
 			getMethodParameter(source, selectedMethod, targetTestMethod, first);
@@ -178,76 +179,77 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			fuzzedValues.add(null);
 			
 			/*
+			 * RUN EVOSUITE
+			 */
+			
+			//get project directory
+
+			/*
 			 * RUN INPUT FUZZERS
 			 */
 			
-			String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
-			System.out.println(cmdLineArg);
+//			String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
+//			System.out.println(cmdLineArg);
+//			
+//			// Python fuzzer
+//			runPythonFuzzer(cmdLineArg);
+//			
+//			// JS fuzzer
+//			runJSFuzzer(cmdLineArg);
+//			
+//			// parse case mutations
+//			parseCaseMutations();
+//			
+//			// parse length mutations
+//			parseLengthMutations();
+//			
+//			// parse other mutations
+//			parseOtherMutations();
+//			
+//			
+//			File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
+//			
+////			// **** Run test with "" ****	
+//			this.input = fuzzedValues.get(0);
+//			runTests(page, executorDirectory);
+//			
+//			TimeUnit.SECONDS.sleep(2);
+//			
+//			/*
+//			 * CHECK FUZZED VALUES FOR DISTANCE & RUN TESTS
+//			 */
+//			
+//			calculateEditDistanceResults(cmdLineArg, page, executorDirectory);
+//			
+//			writeOutputFile();
+		}
+		
 			
-			// Python fuzzer
-			runPythonFuzzer(cmdLineArg);
-			
-			// JS fuzzer
-			runJSFuzzer(cmdLineArg);
-			
-			// parse case mutations
-			parseCaseMutations();
-			
-			// parse length mutations
-			parseLengthMutations();
-			
-			// parse other mutations
-			parseOtherMutations();
-			
-			
-			File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
-			
-//			// **** Run test with "" ****	
-			this.input = fuzzedValues.get(0);
-			runTests(page, executorDirectory);
-			
-			TimeUnit.SECONDS.sleep(2);
-			
-			/*
-			 * CHECK FUZZED VALUES FOR DISTANCE & RUN TESTS
-			 */
-			
-			calculateEditDistanceResults(cmdLineArg, page, executorDirectory);
-			
-			writeOutputFile();
-			
-			TimeUnit.SECONDS.sleep(1);
-			
-			PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView("org.fuzzydriver.plugin.views.FuzzyDriverView");
-			
+//			try {
+//				IViewPart output = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView("org.fuzzydriver.plugin.views.FuzzyDriverView");
+//				
+//				PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().hideView(output);
+//				TimeUnit.SECONDS.sleep(3);
+//				
+//				PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView("org.fuzzydriver.plugin.views.FuzzyDriverView");				
+//				
+//			} 
+//			catch (InterruptedException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			} 
+//			catch (PartInitException e) {
+//				// TODO Auto-generated catch block
+//				e.printStackTrace();
+//			}			
+
 			
 //			/*
 //			 * RUN TESTS
 //			 */
 //			
-
-//			
-//			
-//			
-//			TimeUnit.SECONDS.sleep(2);
-//			
-////			 Run remaining tests from distance results
-//			for (int i=0; i<= distanceResults.size();i++) {
-//				
-//				if (passingTests.size() <1 || failingTests.size()<3) {
-//					this.input = distanceResults.get(i);
-//					runTests(page, executorDirectory);
-//					TimeUnit.SECONDS.sleep(2);						
-//				}
-//			}
-//			
-//			writeOutputFile();
-//			
-//			TimeUnit.SECONDS.sleep(1);
-//			
-//			PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().showView("org.fuzzydriver.plugin.views.FuzzyDriverView");
 						
-		}  catch (JavaModelException e1) {
+		 catch (JavaModelException e1) {
 			// TODO Auto-generated catch block
 			e1.printStackTrace();
 		} catch (Exception e) {

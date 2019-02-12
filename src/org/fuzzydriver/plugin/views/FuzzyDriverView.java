@@ -9,6 +9,7 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.concurrent.TimeUnit;
 
+import org.eclipse.core.resources.IFile;
 import org.eclipse.jface.viewers.ITableLabelProvider;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.swt.SWT;
@@ -22,6 +23,8 @@ import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Label;
+import org.eclipse.ui.IEditorInput;
+import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
@@ -78,6 +81,23 @@ public class FuzzyDriverView extends ViewPart {
     }
 	
 	public void updateView() {
+		IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
+		String projectName=""; 
+		
+		if (editor != null) {
+			// TODO: get project
+			IEditorInput editorInput = editor.getEditorInput();
+			IFile file = (IFile) editorInput.getAdapter(IFile.class);
+			
+		if (file != null) {
+			projectName = file.getProject().getName();	
+		}
+				
+
+//	
+
+		}
+		
 		StringBuffer html = new StringBuffer();
 		
 		html.append("<head>");
@@ -93,26 +113,48 @@ public class FuzzyDriverView extends ViewPart {
 		 html.append("<body style=\"background-color:white;\"><hr>");
 		 
 		
-		 File originalOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-original.txt");
-		File passingOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-passing.txt");
-		File failingOutput = new File("/Users/bjohnson/eclipse-workspace/fuzzy-output-failing.txt");
+		File originalOutput = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzy-output-original_"+ projectName +".txt");
+		File passingOutput = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzy-output-passing_"+ projectName +".txt");
+		File failingOutput = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzy-output-failing_"+ projectName +".txt");
 		
 		if (originalOutput.exists()) {
 			try {
 				BufferedReader br = new BufferedReader(new FileReader(originalOutput));
 				
 				String line = null;
+				StringBuilder sb = new StringBuilder();
+				
+				while ((line=br.readLine())!=null) {
+					sb.append(line);
+					sb.append("<br>");
+				}
+				
+				String originalContents = sb.toString();
+				
+				String oTest = originalContents.substring(originalContents.indexOf("O:")+2,originalContents.indexOf("T:"));
+				String oTrace = originalContents.substring(originalContents.indexOf("T:")+2, originalContents.length());
 				
 				html.append("<h2> Original Failing Test</h2>");
-				while ((line=br.readLine()) != null) {
-					if (line.startsWith("O:")){
-						html.append("<font face='Monaco' size='2'>"+line.substring(line.indexOf("O:")+2, line.length())+"</font>");
-						html.append("<br>");
-					} else {
-						html.append("<font face='Monaco' size='2'>"+line+"</font>");
-						html.append("<br>");
-					}
-				}
+				html.append("<font face='Monaco' size='2'>"+oTest+"</font>");
+				html.append("<br>");
+				html.append("<button onclick=\"myFunction()\">See Execution Trace</button>");
+				html.append("<div id=\"original\" style=\"display:none\">\n");
+				html.append(oTrace);
+				html.append("</div>");
+				
+				html.append("<br>");
+				
+				html.append("<script>\n" + 
+						"function myFunction() {\n" + 
+						"    var x = document.getElementById(\"original\");\n" + 
+						"    if (x.style.display === \"none\") {\n" + 
+						"        x.style.display = \"block\";\n" + 
+						"    } else {\n" + 
+						"        x.style.display = \"none\";\n" + 
+						"    }\n" + 
+						"}\n" + 
+						"</script>");
+				
 				
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
@@ -126,18 +168,72 @@ public class FuzzyDriverView extends ViewPart {
 				BufferedReader br = new BufferedReader(new FileReader(passingOutput));
 				
 				String line = null;
+				StringBuffer sb = new StringBuffer();
+				
+				while ((line=br.readLine()) != null) {
+					sb.append(line);
+					sb.append("<br>");
+				}
+				
+				String passingTests = sb.toString();
+				
+				int lastIndexPassing = 0;
+				String findStr  = "P:";
+				String findStrT = "T:";
+				int lastIndexTrace = 0;
+				String test = "";
+				String trace = "";
+				int count = 0;
 				
 				html.append("<h2>Passing Tests</h2>");
+				while (lastIndexPassing != -1 && lastIndexTrace != -1) {
+					lastIndexPassing = passingTests.indexOf(findStr, lastIndexPassing);
+					lastIndexTrace = passingTests.indexOf(findStrT, lastIndexTrace);
 					
-				while ((line=br.readLine()) != null) {
-					if (line.startsWith("P:")) {
-						html.append("<font face='Monaco' size='2'>" +line.substring(line.indexOf("P:")+2, line.length())+"</font>");
+					
+					if (lastIndexPassing != -1 && lastIndexTrace != -1) {
+						test = passingTests.substring(lastIndexPassing+2, lastIndexTrace);
+						html.append("<font face='Monaco' size='2'>" +test+"</font>");
 						html.append("<br>");
-					} else {
-						html.append("<font face='Monaco' size='2'>"+line+"</font>");
+						
+						lastIndexPassing += findStr.length();
+						
+						int nextIndex = passingTests.indexOf(findStr, lastIndexPassing);
+						
+						// Process differently if only one passing test
+						if (nextIndex == -1) {
+							trace = passingTests.substring(lastIndexTrace+2, passingTests.length());
+						} else {
+							trace = passingTests.substring(lastIndexTrace+2, nextIndex);						
+						}
+						
+						lastIndexTrace += findStrT.length();
+						
+						html.append("<button onclick=\"myFunction"+count+"()\">See Execution Trace</button>");
+						html.append("<div id=\"myDIV"+ count +"\" style=\"display:none\">\n");
+						html.append(trace);
+						html.append("</div>");
+						
 						html.append("<br>");
+						
+						html.append("<script>\n" + 
+								"function myFunction"+count+"() {\n" + 
+								"    var x = document.getElementById(\"myDIV"+ count
+								+ "\");\n" + 
+								"    if (x.style.display === \"none\") {\n" + 
+								"        x.style.display = \"block\";\n" + 
+								"    } else {\n" + 
+								"        x.style.display = \"none\";\n" + 
+								"    }\n" + 
+								"}\n" + 
+								"</script>");
+						count ++;
 					}
+					
+					
+					
 				}
+
 			} catch (FileNotFoundException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -152,21 +248,75 @@ public class FuzzyDriverView extends ViewPart {
 				BufferedReader br = new BufferedReader(new FileReader(failingOutput));
 				
 				String line = null;
+				StringBuffer sb = new StringBuffer();
 				
-				html.append("<h2>Failing Tests</h2>");
-				while ((line = br.readLine()) != null) {
-					
-					if (line.startsWith("F:")) {
-						html.append("<font face='Monaco' size='2'>"+line.substring(line.indexOf("F:")+2, line.length())+"</font>");
-						html.append("<br>");
-					} else {
-						html.append("<font face='Monaco' size='2'>"+line+"</font>");
-						html.append("<br>");
-					}
+				while ((line=br.readLine()) != null) {
+					sb.append(line);
+					sb.append("<br>");
 				}
 				
-//				setViewText("Found output file!");
+				String failingTests = sb.toString();
 				
+				html.append("<h2>Additional Failing Tests</h2>");
+				
+				int lastIndexFailing = 0;
+				String findStr  = "F:";
+				String findStrT = "T:";
+				int lastIndexTrace = 0;
+				String test = "";
+				String trace = "";
+				int count = 5;
+				
+				while (lastIndexFailing != -1 && lastIndexTrace != -1) {
+					lastIndexFailing = failingTests.indexOf(findStr, lastIndexFailing);
+					lastIndexTrace = failingTests.indexOf(findStrT, lastIndexTrace);
+					
+					
+					if (lastIndexFailing != -1 && lastIndexTrace != -1) {
+						test = failingTests.substring(lastIndexFailing+2, lastIndexTrace);
+						html.append("<font face='Monaco' size='2'>" +test+"</font>");
+						html.append("<br>");
+						
+						lastIndexFailing += findStr.length();
+						
+						int nextIndex = failingTests.indexOf(findStr, lastIndexFailing);
+						
+						// Process differently if only one passing test
+						if (nextIndex == -1) {
+							trace = failingTests.substring(lastIndexTrace+2, failingTests.length());
+						} else {
+							trace = failingTests.substring(lastIndexTrace+2, nextIndex);						
+						}
+																		
+						lastIndexTrace += findStrT.length();
+						
+						html.append("<button onclick=\"myFunction"+count+"()\">See Execution Trace</button>");
+						html.append("<div id=\"myDIV"+ count +"\" style=\"display:none\">\n");
+						html.append(trace);
+						html.append("</div>");
+						
+						html.append("<br>");
+						
+						html.append("<script>\n" + 
+								"function myFunction"+count+"() {\n" + 
+								"    var x = document.getElementById(\"myDIV" + count
+								+ "\");\n" + 
+								"    if (x.style.display === \"none\") {\n" + 
+								"        x.style.display = \"block\";\n" + 
+								"    } else {\n" + 
+								"        x.style.display = \"none\";\n" + 
+								"    }\n" + 
+								"}\n" + 
+								"</script>");
+						
+						count ++;
+					}
+					
+					
+					
+				}
+				
+								
 				GridData data = new GridData(GridData.FILL_BOTH);
 			    data.grabExcessHorizontalSpace = true;
 			    data.grabExcessVerticalSpace = true;
