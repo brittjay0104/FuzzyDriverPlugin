@@ -4,10 +4,13 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,8 +26,15 @@ import org.apache.commons.text.similarity.LevenshteinDetailedDistance;
 import org.apache.commons.text.similarity.LevenshteinResults;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.resources.IWorkspace;
+import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.Path;
+import org.eclipse.jdt.core.IClasspathEntry;
 import org.eclipse.jdt.core.ICompilationUnit;
 import org.eclipse.jdt.core.IJavaElement;
+import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.ITypeRoot;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.JavaModelException;
@@ -60,8 +70,10 @@ import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.handlers.HandlerUtil;
 import org.eclipse.ui.texteditor.ITextEditor;
+import org.fuzzydriver.plugin.nodevisitor.GeneratedTestVisitor;
 import org.fuzzydriver.plugin.nodevisitor.TestMethodVisitor;
 import org.fuzzydriver.plugin.util.Test;
+import org.jboss.forge.roaster.Roaster;
 
 public class FuzzyDriverAction implements IEditorActionDelegate {
 	private IWorkbenchWindow window = PlatformUI.getWorkbench().getActiveWorkbenchWindow();
@@ -69,6 +81,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	public File inputFile;
 	public Object input;
 	public File workingDirectory = new File ("/Users/bjohnson/Documents/oxy-workspace/");
+	public String packageNameStart = "org";
 	
 	File binInstrumentedTestDir;
 	File binInstrumentedDepDir;
@@ -86,6 +99,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	
 	Test targetTest;
 	IProject targetProject;
+	String targetProjectName;
 	
 	List<IFile> filesToExport;
 	
@@ -137,6 +151,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 		// create test object
 		targetTest = new Test(testFile.getName());
+		targetProjectName = testFile.getProject().getName();
 		
 		// create compilation unit from test file
 		icu = JavaCore.createCompilationUnitFrom(testFile);
@@ -157,15 +172,14 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			ITypeRoot root = EditorUtility.getEditorInputJavaElement(this.editor, false);
 			IJavaElement selectedElement =  root.getElementAt(selectionOffset);
 			
-			String targetTestMethod = selectedElement.getElementName();
-			
-							
+			String targetTestMethod = selectedElement.getElementName();				
 			
 			// pass target method into visitor to get test method and other relevant parts 
 			getMethodParameter(source, selectedMethod, targetTestMethod, first);
 			targetTest.setTargetMethod(selectedMethod);
 			 
-			System.out.println("\nTest file: " + targetTest.getFilename());  
+			System.out.println("\nTest file: " + targetTest.getFilename()); 
+			System.out.println("Project: " + targetProjectName);
 			System.out.println("Test method: " + targetTest.getTestMethod());
 			System.out.println("Target method: " + targetTest.getTargetMethod());
 			System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
@@ -178,11 +192,85 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			fuzzedValues.add("");
 			fuzzedValues.add(null);
 			
-			/*
+			File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
+			String filePath = testFile.getFullPath().toOSString();
+			// assumes package starts with org but can be changed
+			String targetTestPackage = filePath.substring(filePath.indexOf("org"), filePath.length()-5).replaceAll("/", ".");
+			String targetClassPackage = targetTestPackage.substring(0,targetTestPackage.indexOf("Test"));
+			String classDir = executorDirectory.getAbsolutePath() + "/target/classes";
+			
+			/* 
 			 * RUN EVOSUITE
 			 */
 			
-			//get project directory
+			// create EvoSuite command
+			// java -jar /Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar
+			DefaultExecutor evoExecutor = new DefaultExecutor();
+			evoExecutor.setWorkingDirectory(executorDirectory);
+
+			CommandLine runEvoSuiteCmd = new CommandLine("java");
+			runEvoSuiteCmd.addArgument("-jar");
+			runEvoSuiteCmd.addArgument("/Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar");
+			runEvoSuiteCmd.addArgument("-class");
+			runEvoSuiteCmd.addArgument(targetClassPackage);
+			runEvoSuiteCmd.addArgument("-projectCP");
+			runEvoSuiteCmd.addArgument(classDir);
+//			runEvoSuiteCmd.addArgument("-criterion");
+//			runEvoSuiteCmd.addArgument("branch");
+						
+//			evoExecutor.execute(runEvoSuiteCmd);
+			
+			// TODO: gather inputs from generated tests with matching method call
+			
+			List<String> evoGeneratedInputs = new ArrayList<>();
+			String targetMethod = targetTest.getTargetMethod();
+			
+			// directory with tests
+			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/org/apache/commons/lang3/math");
+			
+			
+//			// put EvoSuite tests dir in classpath
+			// get current classpath
+//			IJavaProject project = JavaCore.create(testFile.getProject());
+//			IClasspathEntry[] oldCP = project.getRawClasspath();
+//			List<IClasspathEntry> newCP = new ArrayList<>();
+//			
+//			for (IClasspathEntry cp : oldCP) {
+//				newCP.add(cp);
+//			}
+//			
+//			IClasspathEntry evoEntry = JavaCore.newSourceEntry(new Path(evoTestsDir.getAbsolutePath()));
+//			newCP.add(evoEntry);
+//			project.setRawClasspath((IClasspathEntry[]) newCP.toArray(), null);
+//		 
+			// find and parse files in directory
+			File[] testFiles = evoTestsDir.listFiles();
+			
+			
+			
+			if (testFiles != null) {
+				for (File file : testFiles) {
+					InputStream is = new FileInputStream(file);
+					BufferedReader br = new BufferedReader(new InputStreamReader(is));
+					
+					String line = br.readLine();
+					StringBuilder sb = new StringBuilder();
+					
+					while (line != null) {
+						sb.append(line).append("\n");
+						line = br.readLine();
+					}
+					
+					String fileAsString = sb.toString();
+					Document genTestDocument = new Document(fileAsString);
+					ASTParser genTestParser = createParser(genTestDocument.get());
+					CompilationUnit gcu = (CompilationUnit) genTestParser.createAST(null);
+					
+					GeneratedTestVisitor visitor = new GeneratedTestVisitor(fileAsString.toCharArray(), targetMethod);
+					gcu.accept(visitor);
+				}
+				
+			}
 
 			/*
 			 * RUN INPUT FUZZERS
@@ -207,7 +295,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 //			parseOtherMutations();
 //			
 //			
-//			File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
+
 //			
 ////			// **** Run test with "" ****	
 //			this.input = fuzzedValues.get(0);
