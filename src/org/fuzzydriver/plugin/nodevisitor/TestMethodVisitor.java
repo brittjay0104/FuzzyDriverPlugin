@@ -71,7 +71,7 @@ public class TestMethodVisitor extends ASTVisitor {
 		
 		return true;
 	}
-	
+	 
 	public boolean visit (MethodInvocation node) {
 		
 		String methInv = node.getName().getFullyQualifiedName();

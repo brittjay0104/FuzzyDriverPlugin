@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -105,6 +107,9 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	
 	List<String> passingTests;
 	List<String> failingTests;
+	
+	// store input closest to original found in generated tests
+	String closestGeneratedInput;
 	
 	List<String> fuzzedValues;
 	List<String> distanceResults;
@@ -220,7 +225,9 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 						
 //			evoExecutor.execute(runEvoSuiteCmd);
 			
-			// TODO: gather inputs from generated tests with matching method call
+			/*
+			 * PARSE TESTS FOR INPUTS
+			 */
 			
 			List<String> evoGeneratedInputs = new ArrayList<>();
 			String targetMethod = targetTest.getTargetMethod();
@@ -228,26 +235,10 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			// directory with tests
 			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/org/apache/commons/lang3/math");
 			
-			
-//			// put EvoSuite tests dir in classpath
-			// get current classpath
-//			IJavaProject project = JavaCore.create(testFile.getProject());
-//			IClasspathEntry[] oldCP = project.getRawClasspath();
-//			List<IClasspathEntry> newCP = new ArrayList<>();
-//			
-//			for (IClasspathEntry cp : oldCP) {
-//				newCP.add(cp);
-//			}
-//			
-//			IClasspathEntry evoEntry = JavaCore.newSourceEntry(new Path(evoTestsDir.getAbsolutePath()));
-//			newCP.add(evoEntry);
-//			project.setRawClasspath((IClasspathEntry[]) newCP.toArray(), null);
-//		 
+
 			// find and parse files in directory
 			File[] testFiles = evoTestsDir.listFiles();
-			
-			
-			
+		
 			if (testFiles != null) {
 				for (File file : testFiles) {
 					InputStream is = new FileInputStream(file);
@@ -268,6 +259,61 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 					
 					GeneratedTestVisitor visitor = new GeneratedTestVisitor(fileAsString.toCharArray(), targetMethod);
 					gcu.accept(visitor);
+					
+					// for single parameter tests
+					List<Object> generatedInputs = visitor.getGeneratedSingleParamInputs();
+					
+					// find generated input closest to original 
+					HashMap<String, Integer> editDistances = new HashMap<String, Integer>();
+					for (Object o : generatedInputs) {
+						
+						System.out.println("Generated input = " + o.toString());
+
+						
+						// Strings (Hamming distance)
+						if (o instanceof StringLiteral || o instanceof CharacterLiteral) {
+							String original = targetTest.getOriginalParameter();			
+							String genInput = String.valueOf(o);
+							
+							int hammingDistance = 0;
+							
+							if (original.length() < genInput.length()) {
+								hammingDistance = hammingDistance(original, genInput);
+							} else {
+								hammingDistance = hammingDistance(genInput, original);
+							}
+							
+							if (!genInput.equals("\"\"")) {
+								editDistances.put(genInput, hammingDistance);								
+							}
+							
+						}
+						
+					}
+					
+					// find closest input to original
+					List<String> closestInputs = findClosestInputs(editDistances);
+					
+					// remove quotes from Strings
+					removeQuotations(closestInputs);
+					
+					// TODO if length of closest inputs > 1, use Levenshtein to determine one closest (?)
+					String closest = "";
+					editDistances.clear();
+					
+					if (closestInputs.size() > 1) {
+						 for (String s : closestInputs) {
+							 int distance = levenshteinDistance(targetTest.getOriginalParameter(), s);
+							 editDistances.put(s, distance);
+						 }
+						 
+						 closestGeneratedInput = findClosestInput(editDistances);
+					}
+					
+					System.out.println("\n Generated input closest to original is --> " + closestGeneratedInput);
+					
+					// TODO: handle multi-param tests
+					
 				}
 				
 			}
@@ -276,25 +322,34 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			 * RUN INPUT FUZZERS
 			 */
 			
-//			String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
-//			System.out.println(cmdLineArg);
-//			
-//			// Python fuzzer
-//			runPythonFuzzer(cmdLineArg);
-//			
-//			// JS fuzzer
-//			runJSFuzzer(cmdLineArg);
-//			
-//			// parse case mutations
-//			parseCaseMutations();
-//			
-//			// parse length mutations
-//			parseLengthMutations();
-//			
-//			// parse other mutations
-//			parseOtherMutations();
-//			
-//			
+			// Run fuzzers with original input
+			String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
+			System.out.println(cmdLineArg);
+			
+			runPythonFuzzer(cmdLineArg, true);
+			runJSFuzzer(cmdLineArg, true);
+		
+			// Run fuzzers with generated input
+			cmdLineArg = closestGeneratedInput;
+			System.out.println(cmdLineArg);
+			
+			runPythonFuzzer(cmdLineArg, false);
+			runJSFuzzer(cmdLineArg, false);
+			
+			/*
+			 * PARSE FUZZER OUTPUT
+			 */
+			
+			// TODO: update file parsers to parse fuzzed files for original and generated inputs
+			// parse case mutations
+			parseCaseMutations();
+			
+			// parse length mutations
+			parseLengthMutations();
+			
+			// parse other mutations
+			parseOtherMutations();
+			
 
 //			
 ////			// **** Run test with "" ****	
@@ -345,6 +400,88 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		} 
 
 
+	}
+	
+	private String findClosestInput(HashMap<String, Integer> editDistances) {
+		String closestInput = "";
+		int lowestDistance = 0;
+		boolean firstIteration = true;
+		
+		Iterator it = editDistances.entrySet().iterator();
+		while (it.hasNext()) {
+			Map.Entry<String, Integer> pair = (Map.Entry<String, Integer>)it.next();
+			int value = (int) pair.getValue();
+			String key = pair.getKey().toString();
+			
+			System.out.println("Input = " + key + " with edit distance = " + value);
+			
+			if (firstIteration) {
+				closestInput = key;
+				lowestDistance = value;
+				firstIteration = false;
+			} else {
+				if (value < lowestDistance) {
+					closestInput = key;
+					lowestDistance = value;
+				}
+			}
+		}
+		
+		return closestInput;
+	}
+
+	private List<String> findClosestInputs(HashMap<String, Integer> editDistances) {
+		List<String> closestInputs = new ArrayList<>();
+		int lowestDistance = 0;
+		boolean firstIteration = true;
+		
+		Iterator it = editDistances.entrySet().iterator();
+		while (it.hasNext()) {
+			Map.Entry<String, Integer> pair = (Map.Entry<String,Integer>) it.next();
+			int value = (int)pair.getValue();
+			String key = pair.getKey().toString();
+
+			if (firstIteration) {
+				// TODO: should I be saving this one in case it's a valid input?
+				lowestDistance = value;
+				firstIteration = false;
+			} else {
+				if (value <= lowestDistance) {
+					closestInputs.add(key);
+					lowestDistance = value;
+				}														
+			}
+		}
+		return closestInputs;
+	}
+
+	private void removeQuotations(List<String> closestInputs) {
+		for (int i=0; i<closestInputs.size(); i++) {
+			String s = closestInputs.get(i);
+			closestInputs.remove(i);
+			closestInputs.add(i, s.substring(1, s.length()-1));
+			System.out.println(closestInputs.get(i));
+			
+		}
+	}
+	
+	private static int hammingDistance(String s1, String s2) {
+		int i = 0, count = 0;
+		
+		while (i < s1.length()) {
+			if (s1.charAt(i) != s2.charAt(i))
+				count++;
+			i++;
+		}
+		return count;	
+	}
+	
+	private int levenshteinDistance(String originalString, String generatedString) {
+		LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
+		
+		LevenshteinResults result = distanceStrategy.apply(originalString, generatedString);
+		
+		return result.getDistance();
 	}
 	
 	private void calculateEditDistanceResults(String cmdLineArg, IWorkbenchPage page, File executorDirectory) throws JavaModelException, ExecuteException, BadLocationException, InterruptedException, IOException {
@@ -790,7 +927,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	}
 	
 	
-	private void runJSFuzzer(String cmdLineArg) throws ExecuteException, IOException {
+	private void runJSFuzzer(String cmdLineArg, boolean originalInput) throws ExecuteException, IOException {
 		CommandLine js_cmdLine = new CommandLine("./fuzzer-test.js");
 		js_cmdLine.addArgument(cmdLineArg);
 		
@@ -799,7 +936,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		js_executor.execute(js_cmdLine);
 	}
 
-	private void runPythonFuzzer(String cmdLineArg) throws ExecuteException, IOException {
+	private void runPythonFuzzer(String cmdLineArg, boolean originalInput) throws ExecuteException, IOException {
 		CommandLine py_cmdLine = new CommandLine("./peach-master/fuzz.py");
 		py_cmdLine.addArgument(cmdLineArg);
 		
