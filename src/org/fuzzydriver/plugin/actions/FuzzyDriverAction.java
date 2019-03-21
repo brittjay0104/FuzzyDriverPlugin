@@ -1109,6 +1109,8 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	
 	private void updateASTParser() {
 		parser = createParser(testDocument.get());
+		parser.setResolveBindings(true);
+		parser.setBindingsRecovery(true);
 		
 		cu = (CompilationUnit) parser.createAST(null);
 		ast = cu.getAST();
@@ -1120,7 +1122,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		JavaCore.setComplianceOptions(JavaCore.VERSION_1_6, options);
 		parser.setCompilerOptions(options);
 		 
-		parser.setResolveBindings(true);
+//		parser.setResolveBindings(true);
 		parser.setStatementsRecovery(true);
 		parser.setSource(source.toCharArray());
 		

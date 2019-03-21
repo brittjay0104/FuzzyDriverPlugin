@@ -149,40 +149,44 @@ public class TestMethodVisitor extends ASTVisitor {
 	private void setMultiParamValues(MethodInvocation node, MethodDeclaration methDec) {
 		for (Object arg : node.arguments()) {
 			if (arg instanceof SimpleName) {
+				SimpleName nameParamOfInterest = (SimpleName) arg;
 				
-				SimpleName nameParamOfInterest = (SimpleName) node.arguments().get(0);
+				for (int i=0; i < assignments.size(); i++) {
+					
+					if (i+1 == assignments.size()-1) {
+						Assignment nextAssign = assignments.get(i+1);
+						String nextAssignVariable = nextAssign.getLeftHandSide().toString();
+						
+						if (nextAssignVariable.equals(nameParamOfInterest.toString())) {
+							if (originalTest) {
+								originalFullTest = findFullTest(node).toString();
+							}
+							fullTest = findFullTest(node).toString();
+							// add assignment to list of parameters
+							paramsOfInterest.add(nextAssign);
+						} 
+					}				
+				}
 				
-				// search all declaration in class for the right one
-//				for (VariableDeclarationStatement stmt : declarations) {
-//					List<VariableDeclarationFragment> frags = stmt.fragments();
-//					
-//					if (frags != null) {
-//						// look for name fragment that matches the parameter of interest
-//						for (VariableDeclarationFragment frag: frags) {
-//							if (frag.getName().toString().equals(nameParamOfInterest.toString())) {
-//								// found declaration of parameter of interest												
-//								List<Statement> statements = methDec.getBody().statements();
-//								
-//								StringBuffer sb = new StringBuffer();
-//								
-//								for (Statement s: statements) {
-//									sb.append(s);
-//									sb.append("\n");
-//								}
-//								
-//								if (sb != null) {
-//									if (originalTest) {
-//										originalFullTest = sb.toString();
-//									}
-//									
-//									testStatements = sb.toString();																					
-//								}
-//								
-//								declOfInterest = stmt;
-//							}
-//						}
-//					}
-//				}
+				if (assignOfInterest == null) {
+					if (declFragments != null) {
+						for (VariableDeclarationFragment frag: declFragments) {
+							if (frag.getName().toString().equals(nameParamOfInterest.toString())) {
+								if (originalTest) {
+									originalFullTest = findFullTest(node).toString();
+								}
+								
+								fullTest = findFullTest(node).toString();
+								paramsOfInterest.add(frag);	
+							}
+						}					
+					}
+				}
+				
+				// TODO: set test statement from iterating over list of params and values (either assignment or declaration frag), 
+				// followed by the actually assertion/test
+					
+				
 			} else {
 				if (arg instanceof StringLiteral || arg instanceof CharacterLiteral) {
 					paramsOfInterest.add(arg);								
@@ -194,7 +198,9 @@ public class TestMethodVisitor extends ASTVisitor {
 					NumberLiteral param = (NumberLiteral) arg;
 					
 					paramsOfInterest.add(param);
-				}	
+				} else if (arg instanceof BooleanLiteral) {
+					BooleanLiteral param = (BooleanLiteral) arg;
+				}
 			}
 			
 		}
@@ -210,7 +216,7 @@ public class TestMethodVisitor extends ASTVisitor {
 			SimpleName nameParamOfInterest = (SimpleName) node.arguments().get(0);
 			
 			for (int i=0; i < assignments.size(); i++) {
-				Assignment assign = assignments.get(i);
+//				Assignment assign = assignments.get(i);
 //				int assignLineNo = ((CompilationUnit) assign.getRoot()).getLineNumber(assign.getStartPosition());
 				
 				if (i+1 == assignments.size()-1) {
@@ -221,12 +227,11 @@ public class TestMethodVisitor extends ASTVisitor {
 						if (originalTest) {
 							originalFullTest = findFullTest(node).toString();
 						}
+						
 						fullTest = findFullTest(node).toString();
 						assignOfInterest = nextAssign;
-						
 						testStatements = assignOfInterest + "\n" + fullTest;
 					} 
-
 				}				
 			}
 			
@@ -237,9 +242,9 @@ public class TestMethodVisitor extends ASTVisitor {
 							if (originalTest) {
 								originalFullTest = findFullTest(node).toString();
 							}
+							
 							fullTest = findFullTest(node).toString();
 							fragOfInterest = frag;	
-							
 							testStatements = fragOfInterest + "\n" + fullTest;
 						}
 					}					
@@ -273,12 +278,12 @@ public class TestMethodVisitor extends ASTVisitor {
 				
 				paramOfInterest = numParam;
 								
+			} else if (node.arguments().get(0) instanceof BooleanLiteral	) {
+				BooleanLiteral boolParam = (BooleanLiteral) node.arguments().get(0);
+				
+				paramOfInterest = boolParam.booleanValue();
 			} 
-//				else if (node.arguments().get(0) instanceof BooleanLiteral	) {
-//						BooleanLiteral boolParam = (BooleanLiteral) node.arguments().get(0);
-//						
-//						paramOfInterest = boolParam.booleanValue();
-//					} else if (node.arguments().get(0) instanceof NullLiteral) {
+//			else if (node.arguments().get(0) instanceof NullLiteral) {
 //						NullLiteral nullParam = (NullLiteral) node.arguments().get(0);
 //						
 //						paramOfInterest = null;
