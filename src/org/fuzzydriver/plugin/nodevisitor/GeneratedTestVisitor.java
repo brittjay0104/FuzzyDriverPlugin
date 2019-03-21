@@ -81,6 +81,8 @@ public class GeneratedTestVisitor extends ASTVisitor {
 					
 					SimpleName nameGenInput = (SimpleName) p;
 					
+					System.out.println(nameGenInput.getParent().toString());
+					
 					// find variable declaration that sets value
 					for (VariableDeclarationStatement stmt : declarations) {
 						List<VariableDeclarationFragment> frags = stmt.fragments();

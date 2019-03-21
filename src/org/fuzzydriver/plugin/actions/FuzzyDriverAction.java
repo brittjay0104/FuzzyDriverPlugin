@@ -97,7 +97,10 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	CompilationUnit cu;
 	ASTParser parser;
 		
+	// parameter from single method parameter call
 	Object currentParam;
+	// parameters from multi-parameter method call
+	Object currentParams;
 	
 	Test targetTest;
 	IProject targetProject;
@@ -150,6 +153,8 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		// get selected method
 		CompilationUnitEditor editor = (CompilationUnitEditor)this.editor;
 		ITextSelection selection = getSelection(editor);
+		int lineNo = selection.getStartLine() +1;
+		System.out.println("Line number = " + lineNo);
 		String selectedMethod = selection.getText();
 
 		System.out.println("The method under test is: " + selectedMethod);
@@ -180,7 +185,8 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			String targetTestMethod = selectedElement.getElementName();				
 			
 			// pass target method into visitor to get test method and other relevant parts 
-			getMethodParameter(source, selectedMethod, targetTestMethod, first);
+			getMethodParameters(source, selectedMethod, targetTestMethod, first, lineNo);			  			
+			
 			targetTest.setTargetMethod(selectedMethod);
 			 
 			System.out.println("\nTest file: " + targetTest.getFilename()); 
@@ -233,6 +239,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			String targetMethod = targetTest.getTargetMethod();
 			
 			// directory with tests
+			// TODO update this to read from right path depending on project
 			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/org/apache/commons/lang3/math");
 			
 
@@ -241,82 +248,67 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 			if (testFiles != null) {
 				for (File file : testFiles) {
-					InputStream is = new FileInputStream(file);
-					BufferedReader br = new BufferedReader(new InputStreamReader(is));
-					
-					String line = br.readLine();
-					StringBuilder sb = new StringBuilder();
-					
-					while (line != null) {
-						sb.append(line).append("\n");
-						line = br.readLine();
-					}
-					
-					String fileAsString = sb.toString();
-					Document genTestDocument = new Document(fileAsString);
-					ASTParser genTestParser = createParser(genTestDocument.get());
-					CompilationUnit gcu = (CompilationUnit) genTestParser.createAST(null);
-					
-					GeneratedTestVisitor visitor = new GeneratedTestVisitor(fileAsString.toCharArray(), targetMethod);
-					gcu.accept(visitor);
-					
-					// for single parameter tests
-					List<Object> generatedInputs = visitor.getGeneratedSingleParamInputs();
-					
-					// find generated input closest to original 
-					HashMap<String, Integer> editDistances = new HashMap<String, Integer>();
-					for (Object o : generatedInputs) {
+					// ignore scaffolding file
+					if (!file.getName().contains("scaffolding")) {						
+//						System.out.println("Generated test file --> " + file.getName());
 						
-						System.out.println("Generated input = " + o.toString());
-
+						List<Object> generatedInputs = findGeneratedInputs(targetMethod, file);
 						
-						// Strings (Hamming distance)
-						if (o instanceof StringLiteral || o instanceof CharacterLiteral) {
-							String original = targetTest.getOriginalParameter();			
-							String genInput = String.valueOf(o);
+						// find generated input closest to original 
+						HashMap<String, Integer> editDistances = new HashMap<String, Integer>();
+						for (Object o : generatedInputs) {
 							
-							int hammingDistance = 0;
+							System.out.println("Generated input = " + o.toString());
 							
-							if (original.length() < genInput.length()) {
-								hammingDistance = hammingDistance(original, genInput);
-							} else {
-								hammingDistance = hammingDistance(genInput, original);
-							}
 							
-							if (!genInput.equals("\"\"")) {
-								editDistances.put(genInput, hammingDistance);								
+							// Strings (Hamming distance)
+							if (o instanceof StringLiteral || o instanceof CharacterLiteral) {
+								String original = targetTest.getOriginalParameter();			
+								String genInput = String.valueOf(o);
+								
+								int hammingDistance = 0;
+								
+								if (original.length() < genInput.length()) {
+									hammingDistance = hammingDistance(original, genInput);
+								} else {
+									hammingDistance = hammingDistance(genInput, original);
+								}
+								
+								if (!genInput.equals("\"\"")) {
+									editDistances.put(genInput, hammingDistance);								
+								}
+								
 							}
 							
 						}
 						
+						// find closest input to original
+						List<String> closestInputs = findClosestInputs(editDistances);
+						
+						// remove quotes from Strings
+						removeQuotations(closestInputs);
+						
+						// TODO if length of closest inputs > 1, use Levenshtein to determine one closest (?)
+						String closest = "";
+						editDistances.clear();
+						
+						if (closestInputs.size() > 1) {
+							for (String s : closestInputs) {
+								int distance = levenshteinDistance(targetTest.getOriginalParameter(), s);
+								editDistances.put(s, distance);
+							}
+							
+							closestGeneratedInput = findClosestInput(editDistances);
+						}
+						
 					}
 					
-					// find closest input to original
-					List<String> closestInputs = findClosestInputs(editDistances);
-					
-					// remove quotes from Strings
-					removeQuotations(closestInputs);
-					
-					// TODO if length of closest inputs > 1, use Levenshtein to determine one closest (?)
-					String closest = "";
-					editDistances.clear();
-					
-					if (closestInputs.size() > 1) {
-						 for (String s : closestInputs) {
-							 int distance = levenshteinDistance(targetTest.getOriginalParameter(), s);
-							 editDistances.put(s, distance);
-						 }
-						 
-						 closestGeneratedInput = findClosestInput(editDistances);
-					}
-					
-					System.out.println("\n Generated input closest to original is --> " + closestGeneratedInput);
-					
-					// TODO: handle multi-param tests
-					
+						
 				}
-				
 			}
+			
+			System.out.println("\n Original parameter is --> " + targetTest.getOriginalParameter());
+			System.out.println("\n Generated input closest to original is --> " + closestGeneratedInput);
 
 			/*
 			 * RUN INPUT FUZZERS
@@ -324,31 +316,30 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			
 			// Run fuzzers with original input
 			String cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
-			System.out.println(cmdLineArg);
+			System.out.println("Input to fuzz --> " + cmdLineArg);
 			
-			runPythonFuzzer(cmdLineArg, true);
-			runJSFuzzer(cmdLineArg, true);
+			runFuzzers(cmdLineArg, true);
 		
 			// Run fuzzers with generated input
 			cmdLineArg = closestGeneratedInput;
-			System.out.println(cmdLineArg);
+			System.out.println("Input to fuzz --> " + cmdLineArg);
 			
-			runPythonFuzzer(cmdLineArg, false);
-			runJSFuzzer(cmdLineArg, false);
-			
+			runFuzzers(cmdLineArg, false);
+
+			System.out.println("Success x 2 !!");
 			/*
 			 * PARSE FUZZER OUTPUT
 			 */
 			
 			// TODO: update file parsers to parse fuzzed files for original and generated inputs
 			// parse case mutations
-			parseCaseMutations();
-			
-			// parse length mutations
-			parseLengthMutations();
-			
-			// parse other mutations
-			parseOtherMutations();
+//			parseCaseMutations();
+//			
+//			// parse length mutations
+//			parseLengthMutations();
+//			
+//			// parse other mutations
+//			parseOtherMutations();
 			
 
 //			
@@ -400,6 +391,31 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		} 
 
 
+	}
+
+	private List<Object> findGeneratedInputs(String targetMethod, File file) throws FileNotFoundException, IOException {
+		InputStream is = new FileInputStream(file);
+		BufferedReader br = new BufferedReader(new InputStreamReader(is));
+		
+		String line = br.readLine();
+		StringBuilder sb = new StringBuilder();
+		
+		while (line != null) {
+			sb.append(line).append("\n");
+			line = br.readLine();
+		}
+		
+		String fileAsString = sb.toString();
+		Document genTestDocument = new Document(fileAsString);
+		ASTParser genTestParser = createParser(genTestDocument.get());
+		CompilationUnit gcu = (CompilationUnit) genTestParser.createAST(null);
+		
+		GeneratedTestVisitor visitor = new GeneratedTestVisitor(fileAsString.toCharArray(), targetMethod);
+		gcu.accept(visitor);
+		
+		// for single parameter tests
+		List<Object> generatedInputs = visitor.getGeneratedSingleParamInputs();
+		return generatedInputs;
 	}
 	
 	private String findClosestInput(HashMap<String, Integer> editDistances) {
@@ -484,7 +500,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		return result.getDistance();
 	}
 	
-	private void calculateEditDistanceResults(String cmdLineArg, IWorkbenchPage page, File executorDirectory) throws JavaModelException, ExecuteException, BadLocationException, InterruptedException, IOException {
+	private void calculateEditDistanceResults(String cmdLineArg, IWorkbenchPage page, File executorDirectory, int lineNo) throws JavaModelException, ExecuteException, BadLocationException, InterruptedException, IOException {
 		
 		LevenshteinDetailedDistance distanceStrategy = new LevenshteinDetailedDistance();
 		String original = cmdLineArg;
@@ -502,7 +518,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 						distanceResults.add(s);
 						
 						this.input = s;
-						runTests(page, executorDirectory);
+						runTests(page, executorDirectory, lineNo);
 						TimeUnit.SECONDS.sleep(2);						
 					}
 				}
@@ -593,7 +609,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 	}
 	
-	private void runTests(IWorkbenchPage page, File executorDirectory)
+	private void runTests(IWorkbenchPage page, File executorDirectory, int lineNo)
 			throws BadLocationException, JavaModelException, InterruptedException, ExecuteException, IOException {
 		
 		// update and save page
@@ -605,7 +621,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 		// update AST parser
 		updateASTParser();
-		getMethodParameter(testDocument.get(), targetTest.getTargetMethod(), targetTest.getTestMethod(), false);
+		getMethodParameters(testDocument.get(), targetTest.getTargetMethod(), targetTest.getTestMethod(), false, lineNo);
 				
 		// D4J compile
 		d4jCompile(executorDirectory); 
@@ -928,21 +944,43 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	
 	
 	private void runJSFuzzer(String cmdLineArg, boolean originalInput) throws ExecuteException, IOException {
+		// TODO: update working directory
+		DefaultExecutor js_executor = new DefaultExecutor();	
+		
+		// TODO: update command to call node first 
 		CommandLine js_cmdLine = new CommandLine("./fuzzer-test.js");
 		js_cmdLine.addArgument(cmdLineArg);
+		js_cmdLine.addArgument(">");
 		
-		DefaultExecutor js_executor = new DefaultExecutor();				
+		// pipe output to files for parsing
+		if (originalInput) {
+			js_cmdLine.addArgument("js_fuzzer_results_original.txt");
+		} else {
+			js_cmdLine.addArgument("js_fuzzer_results_generated.txt");
+		}
+		
 		
 		js_executor.execute(js_cmdLine);
 	}
 
-	private void runPythonFuzzer(String cmdLineArg, boolean originalInput) throws ExecuteException, IOException {
-		CommandLine py_cmdLine = new CommandLine("./peach-master/fuzz.py");
-		py_cmdLine.addArgument(cmdLineArg);
-		
+	private void runFuzzers(String cmdLineArg, boolean originalInput) throws ExecuteException, IOException {
 		DefaultExecutor py_executor = new DefaultExecutor();
+		py_executor.setWorkingDirectory(new File("/Users/bjohnson/Documents/oxy-workspace/fuzzers/"));
+
+		CommandLine py_fuzzer = new CommandLine("./fuzz.sh");
+//		py_lower_cmdLine.addArgument("fuzz-lowercase.py");
+		py_fuzzer.addArgument(cmdLineArg);
+//		py_lower_cmdLine.addArgument(">");
 		
-		py_executor.execute(py_cmdLine);
+		// pipe output to files for parsing
+		if (originalInput) {
+			py_fuzzer.addArgument("py_fuzzer_results_original.txt");
+		} else {
+			py_fuzzer.addArgument("py_fuzzer_results_generated.txt");
+		}
+
+		py_executor.execute(py_fuzzer);
+		System.out.println("Success!");
 	}
 	
 	private void parseOtherMutations() throws FileNotFoundException, IOException {
@@ -1017,12 +1055,12 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		caseFileReader.close();
 	}
 	
-	private void getMethodParameter(String source, String targetMethod, String targetTestMethod, boolean first) {
+	private void getMethodParameters(String source, String targetMethod, String targetTestMethod, boolean first, int lineNo) {
 		TestMethodVisitor visitor;
 		if (first) {
-			visitor = new TestMethodVisitor(source.toCharArray(), targetMethod, targetTestMethod, true);
+			visitor = new TestMethodVisitor(source.toCharArray(), targetMethod, targetTestMethod, true, lineNo);
 		} else {
-			visitor = new TestMethodVisitor(source.toCharArray(), targetMethod, targetTestMethod, false);
+			visitor = new TestMethodVisitor(source.toCharArray(), targetMethod, targetTestMethod, false, lineNo);
 		}
 		
 		cu.accept(visitor);		
@@ -1038,32 +1076,34 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 		targetTest.setTestMethod(visitor.getTargetTestMethod());
 		
+		// TODO: handle multi and single param tests
+		
 		// set up old and new parameters for modification
-		if (visitor.getIsNotStringLiteral()) {
-			// if not hard coded string, get the variable declaration with value
-			currentParam = visitor.getDeclOfInterest();	
-		} else {
-			currentParam = visitor.getParamOfInterest();							
-		}
-		
-		System.out.println("Current parameter = " + currentParam.toString());
-		
-		if (first) {
-			if (visitor.getIsNotStringLiteral()) {
-				String param = currentParam.toString();
-				String originalParam = param.substring(param.indexOf("\""),param.length()-1);
-								
-				targetTest.setOriginalParameter(originalParam);
-			} else {
-				
-				targetTest.setOriginalParameter(currentParam.toString());
-//				if (currentParam == null) {
-//					targetTest.setOriginalParameter("null");
-//				} else {
-//					targetTest.setOriginalParameter(currentParam.toString());									
-//				}
-			}
-		} 
+//		if (visitor.getIsNotStringLiteral() && visitor.getIsNotMultiParam()) {
+//			// if not hard coded string, get the variable declaration with value
+//			currentParam = visitor.getDeclOfInterest();	
+//		} else {
+//			currentParam = visitor.getParamOfInterest();							
+//		}
+//		
+//		System.out.println("Current parameter = " + currentParam.toString());
+//		
+//		if (first) {
+//			if (visitor.getIsNotStringLiteral()) {
+//				String param = currentParam.toString();
+//				String originalParam = param.substring(param.indexOf("\""),param.length()-1);
+//								
+//				targetTest.setOriginalParameter(originalParam);
+//			} else {
+//				
+//				targetTest.setOriginalParameter(currentParam.toString());
+////				if (currentParam == null) {
+////					targetTest.setOriginalParameter("null");
+////				} else {
+////					targetTest.setOriginalParameter(currentParam.toString());									
+////				}
+//			}
+//		} 
 		
 	}
 	
