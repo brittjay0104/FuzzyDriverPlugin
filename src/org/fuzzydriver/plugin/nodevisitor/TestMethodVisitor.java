@@ -54,7 +54,7 @@ public class TestMethodVisitor extends ASTVisitor {
 	public String fullTest;
 	public String originalFullTest;
 	
-	public boolean notStringLiteral = false;
+	public boolean notLiteral = false;
 	public boolean multiParam = false;
 	
 	// list of variables declared (in case needed to find value for test input)
@@ -172,21 +172,12 @@ public class TestMethodVisitor extends ASTVisitor {
 					if (declFragments != null) {
 						for (VariableDeclarationFragment frag: declFragments) {
 							if (frag.getName().toString().equals(nameParamOfInterest.toString())) {
-								if (originalTest) {
-									originalFullTest = findFullTest(node).toString();
-								}
-								
-								fullTest = findFullTest(node).toString();
+								// if not hard coded string, get the variable declaration with value
 								paramsOfInterest.add(frag);	
 							}
 						}					
 					}
-				}
-				
-				// TODO: set test statement from iterating over list of params and values (either assignment or declaration frag), 
-				// followed by the actually assertion/test
-					
-				
+				}				
 			} else {
 				if (arg instanceof StringLiteral || arg instanceof CharacterLiteral) {
 					paramsOfInterest.add(arg);								
@@ -202,17 +193,30 @@ public class TestMethodVisitor extends ASTVisitor {
 					BooleanLiteral param = (BooleanLiteral) arg;
 				}
 			}
-			
 		}
-	}
-	
-	public boolean getIsNotMultiParam() {
-		return multiParam;
+		
+		if (originalTest) {
+			originalFullTest = findFullTest(node).toString();
+		}
+		
+		fullTest = findFullTest(node).toString();
+		
+		StringBuffer sb = new StringBuffer();
+		
+		for (Object param : paramsOfInterest) {
+			sb.append(param.toString());
+			sb.append("\n");
+		}
+		
+		sb.append(fullTest);
+		
+		testStatements = sb.toString();
+		
 	}
 
 	private void setSingleParamValues(MethodInvocation node, MethodDeclaration methDec) {
 		if (node.arguments().get(0) instanceof SimpleName) {
-			notStringLiteral = true;
+			notLiteral = true;
 			SimpleName nameParamOfInterest = (SimpleName) node.arguments().get(0);
 			
 			for (int i=0; i < assignments.size(); i++) {
@@ -300,8 +304,12 @@ public class TestMethodVisitor extends ASTVisitor {
 		return null;
 	}
 	
-	public boolean getIsNotStringLiteral() {
-		return notStringLiteral;
+	public boolean getIsNotLiteral() {
+		return notLiteral;
+	}
+	
+	public boolean getIsMultiParam() {
+		return multiParam;
 	}
 	
 	public String getFullTest() {
@@ -318,6 +326,10 @@ public class TestMethodVisitor extends ASTVisitor {
 	
 	public Object getParamOfInterest() {
 		return paramOfInterest;
+	}
+	
+	public List<Object> getParamsOfInterst(){
+		return paramsOfInterest;
 	}
 	
 	public VariableDeclarationFragment getFragOfInterest() {

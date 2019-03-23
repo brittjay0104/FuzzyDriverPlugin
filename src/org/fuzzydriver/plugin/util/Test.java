@@ -1,9 +1,13 @@
 package org.fuzzydriver.plugin.util;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class Test {
 	
 	String filename;
 	String originalParameter;
+	List<String> originalParameters;
 	String newParameter;
 	String testMethod;
 	String targetMethod;
@@ -20,6 +24,7 @@ public class Test {
 		filename = fname;
 		originalParameter = param;
 		fullTest = test;
+		originalParameters = new ArrayList<String>();
 	}
 	
 	public void setPassed(boolean passed) {
@@ -28,6 +33,10 @@ public class Test {
 	
 	public void setOriginalParameter(String param) {
 		originalParameter = param;
+	}
+	
+	public void addOriginalParameter(String param) {
+		originalParameters.add(param);
 	}
 	
 	public void setOriginalTest(String test) {

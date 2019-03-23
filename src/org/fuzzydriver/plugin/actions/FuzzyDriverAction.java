@@ -100,7 +100,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 	// parameter from single method parameter call
 	Object currentParam;
 	// parameters from multi-parameter method call
-	Object currentParams;
+	List<Object> currentParams;
 	
 	Test targetTest;
 	IProject targetProject;
@@ -135,6 +135,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		passingTests = new ArrayList<>();
 		failingTests = new ArrayList<>();
 		fuzzedValues = new ArrayList<>();
+		currentParams = new ArrayList<>();
 		
 		distanceResults = new ArrayList<String>();
 		
@@ -214,22 +215,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			 * RUN EVOSUITE
 			 */
 			
-			// create EvoSuite command
-			// java -jar /Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar
-			DefaultExecutor evoExecutor = new DefaultExecutor();
-			evoExecutor.setWorkingDirectory(executorDirectory);
-
-			CommandLine runEvoSuiteCmd = new CommandLine("java");
-			runEvoSuiteCmd.addArgument("-jar");
-			runEvoSuiteCmd.addArgument("/Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar");
-			runEvoSuiteCmd.addArgument("-class");
-			runEvoSuiteCmd.addArgument(targetClassPackage);
-			runEvoSuiteCmd.addArgument("-projectCP");
-			runEvoSuiteCmd.addArgument(classDir);
-//			runEvoSuiteCmd.addArgument("-criterion");
-//			runEvoSuiteCmd.addArgument("branch");
-						
-//			evoExecutor.execute(runEvoSuiteCmd);
+//			runEvoSuite(executorDirectory, targetClassPackage, classDir);
 			
 			/*
 			 * PARSE TESTS FOR INPUTS
@@ -391,6 +377,24 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		} 
 
 
+	}
+
+	private void runEvoSuite(File executorDirectory, String targetClassPackage, String classDir)
+			throws ExecuteException, IOException {
+		DefaultExecutor evoExecutor = new DefaultExecutor();
+		evoExecutor.setWorkingDirectory(executorDirectory);
+
+		CommandLine runEvoSuiteCmd = new CommandLine("java");
+		runEvoSuiteCmd.addArgument("-jar");
+		runEvoSuiteCmd.addArgument("/Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar");
+		runEvoSuiteCmd.addArgument("-class");
+		runEvoSuiteCmd.addArgument(targetClassPackage);
+		runEvoSuiteCmd.addArgument("-projectCP");
+		runEvoSuiteCmd.addArgument(classDir);
+//			runEvoSuiteCmd.addArgument("-criterion");
+//			runEvoSuiteCmd.addArgument("branch");
+					
+		evoExecutor.execute(runEvoSuiteCmd);
 	}
 
 	private List<Object> findGeneratedInputs(String targetMethod, File file) throws FileNotFoundException, IOException {
@@ -1076,35 +1080,47 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		
 		targetTest.setTestMethod(visitor.getTargetTestMethod());
 		
-		// TODO: handle multi and single param tests
-		
 		// set up old and new parameters for modification
-//		if (visitor.getIsNotStringLiteral() && visitor.getIsNotMultiParam()) {
-//			// if not hard coded string, get the variable declaration with value
-//			currentParam = visitor.getDeclOfInterest();	
-//		} else {
-//			currentParam = visitor.getParamOfInterest();							
-//		}
-//		
-//		System.out.println("Current parameter = " + currentParam.toString());
-//		
-//		if (first) {
-//			if (visitor.getIsNotStringLiteral()) {
-//				String param = currentParam.toString();
-//				String originalParam = param.substring(param.indexOf("\""),param.length()-1);
-//								
-//				targetTest.setOriginalParameter(originalParam);
-//			} else {
-//				
-//				targetTest.setOriginalParameter(currentParam.toString());
-////				if (currentParam == null) {
-////					targetTest.setOriginalParameter("null");
-////				} else {
-////					targetTest.setOriginalParameter(currentParam.toString());									
-////				}
-//			}
-//		} 
-		
+		if (!visitor.getIsMultiParam()) {
+			if (visitor.getIsNotLiteral()) {
+				// if not hard coded string, get var frag with value
+				currentParam = visitor.getFragOfInterest();
+				
+			} else {
+				currentParam = visitor.getParamOfInterest();
+			}
+			
+			System.out.println("Current parameter = " + currentParam.toString());
+			
+			// set original test parameter (if first go around)
+			if (first) {
+				String originalParam = currentParam.toString();
+				// if String, make sure quotes aren't saved along with input (only value)
+				if (originalParam.contains("\"")) {
+					// TODO: for fragments, may need to do -2 to account for semi-colon at the end
+					originalParam = originalParam.substring(originalParam.indexOf("\""), originalParam.length()-1);
+				}
+				
+				targetTest.setOriginalParameter(originalParam);
+			}
+			
+		} else {
+			System.out.println("Current set of parameters are:");
+			for (Object param : visitor.getParamsOfInterst()) {
+				currentParams.add(param);
+				System.out.println(param.toString());	
+				// set original test parameters (if first go around)
+				if (first) {
+					String originalParam = currentParam.toString();
+					
+					if (originalParam.contains("\"")){
+						originalParam = originalParam.substring(originalParam.indexOf("\""), originalParam.length()-1);
+					}
+					
+					targetTest.addOriginalParameter(originalParam);
+				}
+			}
+		}		
 	}
 	
 	private void updateASTParser() {
