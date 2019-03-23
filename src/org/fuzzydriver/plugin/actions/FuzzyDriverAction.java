@@ -211,11 +211,17 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			String targetClassPackage = targetTestPackage.substring(0,targetTestPackage.indexOf("Test"));
 			String classDir = executorDirectory.getAbsolutePath() + "/target/classes";
 			
+			System.out.println("Working directory = " + executorDirectory);
+			System.out.println("Path to test file = " + filePath);
+			System.out.println("Target test package = " + targetTestPackage);
+			System.out.println("Target test class package = " + targetClassPackage);
+			System.out.println("Class directory = " + classDir);
+			
 			/* 
 			 * RUN EVOSUITE
 			 */
 			
-//			runEvoSuite(executorDirectory, targetClassPackage, classDir);
+			runEvoSuite(executorDirectory, targetClassPackage, classDir);
 			
 			/*
 			 * PARSE TESTS FOR INPUTS
@@ -1072,6 +1078,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 		targetTest.setOriginalTest(visitor.getOriginalTest());			
 		
 		MethodInvocation testMethodInvoc = visitor.getFullMethod();
+		
 		if (visitor.getTestStatements() == null) {			
 			targetTest.setFullTest(visitor.getFullTest());
 		} else {
@@ -1111,7 +1118,7 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 				System.out.println(param.toString());	
 				// set original test parameters (if first go around)
 				if (first) {
-					String originalParam = currentParam.toString();
+					String originalParam = param.toString();
 					
 					if (originalParam.contains("\"")){
 						originalParam = originalParam.substring(originalParam.indexOf("\""), originalParam.length()-1);

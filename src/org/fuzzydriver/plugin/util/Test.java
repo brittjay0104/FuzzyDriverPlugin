@@ -18,6 +18,7 @@ public class Test {
 	
 	public Test(String fname) {
 		filename = fname;
+		originalParameters = new ArrayList<>();
 	}
 	
 	public Test(String fname, String param, String test) {
