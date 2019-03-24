@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
+	<classpathentry exported="true" kind="lib" path="lib/commons-io-2.6.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/roaster-api-2.20.8.Final.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/org.eclipse.ui.workbench.texteditor-3.3.2.jar"/>
 	<classpathentry exported="true" kind="lib" path="lib/commons-text-1.0.jar"/>
@@ -19,5 +20,6 @@
 	<classpathentry kind="lib" path="/Users/bjohnson/eclipse-workspace/org.fuzzydriver.plugin/lib/org.eclipse.ui.workbench.texteditor-3.3.2.jar"/>
 	<classpathentry kind="lib" path="/Users/bjohnson/Documents/Research_2017-2018/causal_testing/JWalk/JWalk11.jar"/>
 	<classpathentry kind="lib" path="/Users/bjohnson/Documents/oxy-workspace/lib/roaster-api-2.20.8.Final.jar"/>
+	<classpathentry kind="lib" path="/Users/bjohnson/Documents/oxy-workspace/lib/commons-io-2.6.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

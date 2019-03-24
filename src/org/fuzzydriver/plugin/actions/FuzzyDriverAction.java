@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -24,8 +25,10 @@ import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
 import org.apache.commons.exec.ExecuteException;
 import org.apache.commons.exec.PumpStreamHandler;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.text.similarity.LevenshteinDetailedDistance;
 import org.apache.commons.text.similarity.LevenshteinResults;
+import org.eclipse.core.internal.utils.FileUtil;
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IWorkspace;
@@ -205,23 +208,61 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			fuzzedValues.add(null);
 			
 			File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
-			String filePath = testFile.getFullPath().toOSString();
-			// assumes package starts with org but can be changed
-			String targetTestPackage = filePath.substring(filePath.indexOf("org"), filePath.length()-5).replaceAll("/", ".");
-			String targetClassPackage = targetTestPackage.substring(0,targetTestPackage.indexOf("Test"));
-			String classDir = executorDirectory.getAbsolutePath() + "/target/classes";
+			File baseClassDir = new File(executorDirectory.getPath() + "/bin/");
+			File srcDir;
 			
-			System.out.println("Working directory = " + executorDirectory);
-			System.out.println("Path to test file = " + filePath);
-			System.out.println("Target test package = " + targetTestPackage);
-			System.out.println("Target test class package = " + targetClassPackage);
-			System.out.println("Class directory = " + classDir);
+			if ((new File(executorDirectory.getPath() + "/src").exists())) {
+				srcDir = new File(executorDirectory.getPath() + "/src/");
+	
+			} else {
+				srcDir = new File(executorDirectory.getPath() + "/source/");
+			}
+			
+			String testFile = this.testFile.getName();
+			String fileUnderTest = testFile.substring(0, testFile.indexOf("Test"));
+			String targetFilePackage = "";
+			String classDir = baseClassDir.getAbsolutePath();
+			
+			try {
+				boolean recursive = true;
+				
+				Collection files = FileUtils.listFiles(srcDir, null, recursive);
+				
+				for (Iterator i = files.iterator(); i.hasNext();) {
+					File f = (File) i.next();
+					
+					// only check files that are java files 
+					if (f.getName().contains(".java")) {
+						
+						String className = f.getName().substring(0, f.getName().indexOf(".java"));
+						
+						// check if target file; if so, store necessary information
+						if (className.equals(fileUnderTest)) {
+							System.out.println("Path to target file = " + f.getAbsolutePath());
+							
+							File targetFileDir = new File (f.getAbsolutePath());
+							String pathToFile = targetFileDir.getAbsolutePath();
+							targetFilePackage = pathToFile.substring(pathToFile.indexOf("org"), pathToFile.length()-5).replace("/", ".");
+							
+//							String targetFileDirectory = targetFilePackage.substring(0, targetFilePackage.lastIndexOf("."));
+//							classDir = baseClassDir + "/" + targetFileDirectory.replace(".", "/");							
+														
+						}
+					}
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}		
+			
+			System.out.println("Working directory = " + executorDirectory.getPath());
+			System.out.println("File package = " + targetFilePackage);
+			System.out.println("Class file directory = " + classDir);
 			
 			/* 
 			 * RUN EVOSUITE
 			 */
 			
-			runEvoSuite(executorDirectory, targetClassPackage, classDir);
+			runEvoSuite(executorDirectory, targetFilePackage, baseClassDir.getAbsolutePath());
 			
 			/*
 			 * PARSE TESTS FOR INPUTS
@@ -232,7 +273,8 @@ public class FuzzyDriverAction implements IEditorActionDelegate {
 			
 			// directory with tests
 			// TODO update this to read from right path depending on project
-			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/org/apache/commons/lang3/math");
+			System.out.println(targetFilePackage.replace(".", "/"));
+			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/");
 			
 
 			// find and parse files in directory
