@@ -5,21 +5,21 @@
    <extension
          point="org.eclipse.ui.commands">
       <category
-            name="Fuzzy Driver Commands"
-            id="org.fuzzydriver.plugin.commands.category">
+            name="Holmes Commands"
+            id="org.holmes.plugin.commands.category">
       </category>
       <command
-            name="Run Fuzzy Driver"
-            categoryId="org.fuzzydriver.plugin.commands.category"
-            id="org.fuzzydriver.plugin.commands.runFuzzyDriver">
+            name="Run Holmes"
+            categoryId="org.holmes.plugin.commands.category"
+            id="org.holmes.plugin.commands.runHolmes">
       </command>
    </extension>
    
    <extension
    		point="org.eclipse.ui.views">
-   		<view id="org.fuzzydriver.plugin.views.FuzzyDriverView"
-   			name="Fuzzy Driver View"
-   			class="org.fuzzydriver.plugin.views.FuzzyDriverView"
+   		<view id="org.holmes.plugin.views.HolmesView"
+   			name="Holmes View"
+   			class="org.holmes.plugin.views.HolmesView"
    			icon="icons/sample.png"/>
    </extension>
    
@@ -28,9 +28,9 @@
 	      	id="org.eclipse.ui.articles.action.contribution.popup.navigator"
 	   		targetID="#CompilationUnitEditorContext"> 
 	      	<action
-	      		class="org.fuzzydriver.plugin.actions.FuzzyDriverAction"
+	      		class="org.holmes.plugin.actions.RunHolmes"
 	      		id=""
-	      		label="Run Fuzzy Driver"
+	      		label="Run Holmes"
 	      		icon="icons/holmes.png"
 	      		menubarPath="additions">
 	      	</action>
