@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -75,6 +76,7 @@ import org.eclipse.ui.IWorkbenchPage;
 import org.eclipse.ui.IWorkbenchWindow;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.actions.WorkspaceAction;
 import org.holmes.plugin.nodevisitor.GeneratedTestVisitor;
 import org.holmes.plugin.nodevisitor.TestMethodVisitor;
 import org.holmes.plugin.util.Test;
@@ -84,12 +86,12 @@ public class RunHolmes implements IEditorActionDelegate {
 	private IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
 	private IWorkbenchPage page = window.getActivePage();
 	
-	public File workingDirectory = new File ("/Users/bjohnson/Documents/oxy-workspace/");
+	public File workingDirectory;
 	
-	public String testGenJar = "/Users/bjohnson/Documents/oxy-workspace/lib/evosuite-1.0.6.jar";
+	public String testGenJar;
 	
 	public String packageNameStart = "org";
-	public File outputFile = new File(workingDirectory.getPath()+"/holmes-output.txt");
+	public File outputFile;
 	public File inputFile;
 	
 	public Object input;
@@ -148,325 +150,329 @@ public class RunHolmes implements IEditorActionDelegate {
 		} catch (PartInitException e2) {
 			e2.printStackTrace();
 		}
-		
-		if (outputFile.exists()) {
-			outputFile.delete();					
-		}
 
 		// File of interest
 		IEditorInput input = editor.getEditorInput();
 		testFile = ((IFileEditorInput)input).getFile();
 		
-		// get selected method & line number
-		CompilationUnitEditor editor = (CompilationUnitEditor)this.editor;
-		ITextSelection selection = getSelection(editor);
-		int lineNo = selection.getStartLine() +1;
-		String selectedMethod = selection.getText();
-
-		System.out.println("Line number = " + lineNo);
-		System.out.println("The method under test is: " + selectedMethod);
-		
-		// create test object
-		targetTest = new Test(testFile.getName());
-		targetProjectName = testFile.getProject().getName();
-		
-		
 		// create compilation unit from test file
 		icu = JavaCore.createCompilationUnitFrom(testFile);
+		
+		// set working directory, output file, and evosuite jar based on project location
+		String projectDirectory = testFile.getProject().getRawLocation().toPortableString();
+		workingDirectory = new File(projectDirectory.substring(0, projectDirectory.indexOf(testFile.getProject().getName())-1));
+		outputFile = new File(workingDirectory.getPath()+"/holmes-output.txt");
+		testGenJar = workingDirectory.getPath()+"/lib/evosuite-1.0.6.jar";
+		
+		if (outputFile.exists()) {
+			outputFile.delete();					
+		}
 		
 		// directory where source project is located (working directory for test generation)
 		File executorDirectory = new File(workingDirectory.getPath() + "/" + testFile.getProject().getName());
 		
+		File srcDir;
 		
-		try {
-			// creation of document containing source code			
-			String source = icu.getSource();
-			testDocument = new Document(source);
+		if ((new File(executorDirectory.getPath() + "/src").exists())) {
+			srcDir = new File(executorDirectory.getPath() + "/src/");
 			
-			// find source directory
-			File baseClassDir;
+		} else {
+			srcDir = new File(executorDirectory.getPath() + "/source/");
+		}
+		
+		//get Java project for type bindings
+		IProject currentProject = testFile.getProject();
+		IJavaProject javaProject = JavaCore.create(currentProject);
+		
+		
+		if (javaProject.exists()) {
+			System.out.println("Java project found!");
 			
-			if ((new File(executorDirectory.getPath() + "/bin/").exists())){
-				baseClassDir = new File(executorDirectory.getPath() + "/bin/");
-			} else {
-				baseClassDir = new File(executorDirectory.getPath() + "/target/classes");
-			}
-			File srcDir;
-			
-			if ((new File(executorDirectory.getPath() + "/src").exists())) {
-				srcDir = new File(executorDirectory.getPath() + "/src/");
+			try {
 				
-			} else {
-				srcDir = new File(executorDirectory.getPath() + "/source/");
-			}
-			
-			//get Java project for type bindings
-			IProject currentProject = testFile.getProject();
-			IJavaProject javaProject = JavaCore.create(currentProject);
-			
-			if (javaProject.exists()) {
-				System.out.println("Java project found!");
-				
-				classpath = getClasspath(javaProject);	
+				classpath = getClasspath(javaProject);
 				srcDirectory = new String[] {srcDir.getPath()};
+				
+				// creation of document containing source code	
+				String source = icu.getSource();
+				testDocument = new Document(source);
 				
 				// create and set up ASTParser (with source directory and classpath)
 				updateASTParser();
+
+				// get selected method & line number
+				CompilationUnitEditor editor = (CompilationUnitEditor)this.editor;
+				ITextSelection selection = getSelection(editor);
+				int lineNo = selection.getStartLine() +1;
+				String selectedMethod = selection.getText();
+
+				System.out.println("Line number = " + lineNo);
+				System.out.println("The method under test is: " + selectedMethod);
 				
-			} else {
-				System.out.println("No java projects found!");
-			}
-			
-			// get parameter of interest
-			getParamOfInterest(selection, lineNo, selectedMethod, executorDirectory, source);
-			 
-			System.out.println("\nTest file: " + targetTest.getFilename()); 
-			System.out.println("Project: " + targetProjectName);
-			System.out.println("Test method: " + targetTest.getTestMethod());
-			System.out.println("Target method: " + targetTest.getTargetMethod());
-			
-			if (targetTest.getOriginalParameter() == null) {
-				isMultiParam = true;
-				System.out.println("Original test parameters: ");
-				for (String s : targetTest.getOriginalParameters()) {
-					System.out.println(s);
+				// create test object
+				targetTest = new Test(testFile.getName());
+				targetProjectName = testFile.getProject().getName();
+				
+				// get parameter of interest
+				getParamOfInterest(selection, lineNo, selectedMethod, executorDirectory, source);
+				 
+				System.out.println("\nTest file: " + targetTest.getFilename()); 
+				System.out.println("Project: " + targetProjectName);
+				System.out.println("Test method: " + targetTest.getTestMethod());
+				System.out.println("Target method: " + targetTest.getTargetMethod());
+				
+				if (targetTest.getOriginalParameter() == null) {
+					isMultiParam = true;
+					System.out.println("Original test parameters: ");
+					for (String s : targetTest.getOriginalParameters()) {
+						System.out.println(s);
+					}
+				} else {
+					isMultiParam = false;
+					System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
 				}
-			} else {
-				isMultiParam = false;
-				System.out.println("Original test parameter: " + targetTest.getOriginalParameter());
-			}
-		
-			System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 			
-			// write original test to file to pipe to view later
-			writeOriginalTestToFile(workingDirectory.getPath()+"/holmes-output-original.txt");
-			
-			String testFile = this.testFile.getName();
-			String fileUnderTest = testFile.substring(0, testFile.indexOf("Test"));
-			String targetFilePackage = "";
-			String classDir = baseClassDir.getAbsolutePath();
-			
-			// find file under test
-			boolean recursive = true;
-			Collection files = FileUtils.listFiles(srcDir, null, recursive);
-			
-			for (Iterator i = files.iterator(); i.hasNext();) {
-				File f = (File) i.next();
+				System.out.println("Full test: " + targetTest.getFullTest() + "\n");
 				
-				// only check files that are java files 
-				if (f.getName().contains(".java")) {
+				// write original test to file to pipe to view later
+				writeOriginalTestToFile(workingDirectory.getPath()+"/holmes-output-original.txt");
+				
+				// find source directory
+				File baseClassDir;
+				
+				if ((new File(executorDirectory.getPath() + "/bin/").exists())){
+					baseClassDir = new File(executorDirectory.getPath() + "/bin/");
+				} else {
+					baseClassDir = new File(executorDirectory.getPath() + "/target/classes");
+				}
+				
+				String testFile = this.testFile.getName();
+				String fileUnderTest = testFile.substring(0, testFile.indexOf("Test"));
+				String targetFilePackage = "";
+				String classDir = baseClassDir.getAbsolutePath();
+				
+				// find file under test
+				boolean recursive = true;
+				Collection files = FileUtils.listFiles(srcDir, null, recursive);
+				
+				for (Iterator i = files.iterator(); i.hasNext();) {
+					File f = (File) i.next();
 					
-					String className = f.getName().substring(0, f.getName().indexOf(".java"));
-					
-					// check if target file; if so, store necessary information
-					if (className.equals(fileUnderTest)) {
-						System.out.println("Path to target file = " + f.getAbsolutePath());
+					// only check files that are java files 
+					if (f.getName().contains(".java")) {
 						
-						File targetFileDir = new File (f.getAbsolutePath());
-						String pathToFile = targetFileDir.getAbsolutePath();
-						targetFilePackage = pathToFile.substring(pathToFile.indexOf("org"), pathToFile.length()-5).replace("/", ".");
+						String className = f.getName().substring(0, f.getName().indexOf(".java"));
 						
-						String targetFileDirectory = targetFilePackage.substring(0, targetFilePackage.lastIndexOf("."));
-						classDir = baseClassDir + "/" + targetFileDirectory.replace(".", "/");
-												
-						System.out.println("Working directory = " + executorDirectory.getPath());
-						System.out.println("File package = " + targetFilePackage);
-						System.out.println("Class file directory = " + classDir);
-						
+						// check if target file; if so, store necessary information
+						if (className.equals(fileUnderTest)) {
+							System.out.println("Path to target file = " + f.getAbsolutePath());
+							
+							File targetFileDir = new File (f.getAbsolutePath());
+							String pathToFile = targetFileDir.getAbsolutePath();
+							targetFilePackage = pathToFile.substring(pathToFile.indexOf("org"), pathToFile.length()-5).replace("/", ".");
+							
+							String targetFileDirectory = targetFilePackage.substring(0, targetFilePackage.lastIndexOf("."));
+							classDir = baseClassDir + "/" + targetFileDirectory.replace(".", "/");
+													
+							System.out.println("Working directory = " + executorDirectory.getPath());
+							System.out.println("File package = " + targetFilePackage);
+							System.out.println("Class file directory = " + classDir);
+							
+						}
 					}
 				}
-			}
-			
-			/* 
-			 * RUN EVOSUITE
-			 */
-			
-//			runEvoSuite(executorDirectory, targetFilePackage, baseClassDir.getAbsolutePath());
-			
-			/*
-			 * PARSE TESTS FOR INPUTS
-			 */
-			
-			List<String> evoGeneratedInputs = new ArrayList<>();
-			String targetMethod = targetTest.getTargetMethod();
-			System.out.println(targetMethod);
-			
-			// directory with tests
-			targetFilePackage = targetFilePackage.substring(0, targetFilePackage.lastIndexOf("."));
-			File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/" + targetFilePackage.replace(".", "/"));
-			System.out.println(evoTestsDir.getAbsolutePath());
-			
-			// find and parse files in directory
-			File[] testFiles = evoTestsDir.listFiles();
-		
-			parseGeneratedTests(targetMethod, testFiles);
-			
-			if (isMultiParam) {
-			System.out.println("\n Original parameters are --> " + targetTest.getOriginalParameters());
-			} else {
-				System.out.println("\n Original parameter is --> " + targetTest.getOriginalParameter());
 				
-			}
-		
-			
-			/*
-			 * RUN INPUT FUZZERS
-			 */
-			
-			String cmdLineArg = "";
-			
-			// Run fuzzers with original input(s)
-			// TODO update to iterate over currentParams (Literal, Decls, Assigns) not originalParameters (Strings) 
-			if (isMultiParam) {				
-				List<String> params = targetTest.getOriginalParameters();
+				/* 
+				 * RUN EVOSUITE
+				 */
 				
-				for (int i=0; i < params.size(); i++) {
-					String param = params.get(i);
+				runEvoSuite(executorDirectory, targetFilePackage, baseClassDir.getAbsolutePath());
+				
+				/*
+				 * PARSE TESTS FOR INPUTS
+				 */
+				
+				List<String> evoGeneratedInputs = new ArrayList<>();
+				String targetMethod = targetTest.getTargetMethod();
+				System.out.println(targetMethod);
+				
+				// directory with tests
+				targetFilePackage = targetFilePackage.substring(0, targetFilePackage.lastIndexOf("."));
+				File evoTestsDir = new File(executorDirectory.getAbsolutePath() + "/evosuite-tests/" + targetFilePackage.replace(".", "/"));
+				System.out.println(evoTestsDir.getAbsolutePath());
+				
+				// find and parse files in directory
+				File[] testFiles = evoTestsDir.listFiles();
+			
+				parseGeneratedTests(targetMethod, testFiles);
+				
+				if (isMultiParam) {
+				System.out.println("\n Original parameters are --> " + targetTest.getOriginalParameters());
+				} else {
+					System.out.println("\n Original parameter is --> " + targetTest.getOriginalParameter());
 					
-					if (param.contains("=")) {
-						cmdLineArg = param.substring(param.indexOf("="), param.indexOf(";")).replaceAll("\"", "");
-					} else {
-						cmdLineArg = params.get(i).replaceAll("\"", "");						
-					}
-					
-					System.out.println("Input to fuzz --> " + cmdLineArg);
-					
-					String fileId = Integer.toString(i);
-					runFuzzers(cmdLineArg, true, fileId);
 				}
-			} else {
-				cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
-				System.out.println("Input to fuzz --> " + cmdLineArg);
-				
-				runFuzzers(cmdLineArg, true, "1");
-			}
 			
-			// Run fuzzers with generated input(s)
-			Iterator it = closestGeneratedInputs.entrySet().iterator();
-			
-			// iterate over each parameter (will only be multiple iterations if multiple parameters)
-			int param_count = 0;
-			while (it.hasNext()) {
-				Map.Entry<String, List<String>> pair = (Map.Entry<String, List<String>>) it.next();
-				List<String> genParams = pair.getValue();
-				List<String> noDups = new ArrayList<>(new HashSet<>(genParams));
 				
-				for (int i=0; i < noDups.size(); i++) {
-					cmdLineArg = noDups.get(i).replaceAll("\"", "");
+				/*
+				 * RUN INPUT FUZZERS
+				 */
+				
+				String cmdLineArg = "";
+				
+				// Run fuzzers with original input(s)
+				// TODO update to iterate over currentParams (Literal, Decls, Assigns) not originalParameters (Strings) 
+				if (isMultiParam) {				
+					List<String> params = targetTest.getOriginalParameters();
+					
+					for (int i=0; i < params.size(); i++) {
+						String param = params.get(i);
+						
+						if (param.contains("=")) {
+							cmdLineArg = param.substring(param.indexOf("="), param.indexOf(";")).replaceAll("\"", "");
+						} else {
+							cmdLineArg = params.get(i).replaceAll("\"", "");						
+						}
+						
+						System.out.println("Input to fuzz --> " + cmdLineArg);
+						
+						String fileId = Integer.toString(i);
+						runFuzzers(cmdLineArg, true, fileId);
+					}
+				} else {
+					cmdLineArg = targetTest.getOriginalParameter().replaceAll("\"", "");
 					System.out.println("Input to fuzz --> " + cmdLineArg);
 					
-					String paramId = Integer.toString(param_count);
-					String fileId = Integer.toString(i);
-					runFuzzers(cmdLineArg, false, paramId+ "_"+ fileId);
-				}				
+					runFuzzers(cmdLineArg, true, "1");
+				}
 				
-				param_count ++;
-			}
-			
-			/*
-			 * PARSE FUZZER OUTPUT & EXECUTE TESTS
-			 */
-			
-			// parse original mutation files
-			if (isMultiParam) {
-				List<String> originalParams = targetTest.getOriginalParameters();
-				for (int i=0; i<originalParams.size(); i++) {
-					String fileId = Integer.toString(i);
+				// Run fuzzers with generated input(s)
+				Iterator it = closestGeneratedInputs.entrySet().iterator();
+				
+				// iterate over each parameter (will only be multiple iterations if multiple parameters)
+				int param_count = 0;
+				while (it.hasNext()) {
+					Map.Entry<String, List<String>> pair = (Map.Entry<String, List<String>>) it.next();
+					List<String> genParams = pair.getValue();
+					List<String> noDups = new ArrayList<>(new HashSet<>(genParams));
 					
-					File original_fuzzed = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzers/fuzzer_results_original_" + fileId + ".txt");
+					for (int i=0; i < noDups.size(); i++) {
+						cmdLineArg = noDups.get(i).replaceAll("\"", "");
+						System.out.println("Input to fuzz --> " + cmdLineArg);
+						
+						String paramId = Integer.toString(param_count);
+						String fileId = Integer.toString(i);
+						runFuzzers(cmdLineArg, false, paramId+ "_"+ fileId);
+					}				
+					
+					param_count ++;
+				}
+				
+				/*
+				 * PARSE FUZZER OUTPUT & EXECUTE TESTS
+				 */
+				
+				// parse original mutation files
+				if (isMultiParam) {
+					List<String> originalParams = targetTest.getOriginalParameters();
+					for (int i=0; i<originalParams.size(); i++) {
+						String fileId = Integer.toString(i);
+						
+						File original_fuzzed = new File(workingDirectory.getPath() + "/fuzzers/fuzzer_results_original_" + fileId + ".txt");
+						
+						if (original_fuzzed.exists()) {
+							BufferedReader br = new BufferedReader(new FileReader(original_fuzzed));
+							
+							String line = "";
+							int threshold = 4;
+							int distance = 0;
+							int paramPlace = i;
+							
+							updateAndRunTest(lineNo, executorDirectory, originalParams, i, br, threshold, paramPlace);
+						}
+						
+					} 
+				} else {
+					File original_fuzzed = new File(workingDirectory.getPath() + "/fuzzers/fuzzer_results_original_1.txt");
+					
+					String original = targetTest.getOriginalParameter();
 					
 					if (original_fuzzed.exists()) {
+						
 						BufferedReader br = new BufferedReader(new FileReader(original_fuzzed));
 						
 						String line = "";
 						int threshold = 4;
 						int distance = 0;
-						int paramPlace = i;
 						
-						updateAndRunTest(lineNo, executorDirectory, originalParams, i, br, threshold, paramPlace);
+						//create list to store original param for updateAndRunTest (TODO: refactor) 
+						List<String> originalParams = new ArrayList<>();
+						originalParams.add(original);
+						
+						updateAndRunTest(lineNo, executorDirectory, originalParams, 0, br, threshold, 0);
+
 					}
 					
-				} 
-			} else {
-				File original_fuzzed = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzers/fuzzer_results_original_1.txt");
-				
-				String original = targetTest.getOriginalParameter();
-				
-				if (original_fuzzed.exists()) {
-					
-					BufferedReader br = new BufferedReader(new FileReader(original_fuzzed));
-					
-					String line = "";
-					int threshold = 4;
-					int distance = 0;
-					
-					//create list to store original param for updateAndRunTest (TODO: refactor) 
-					List<String> originalParams = new ArrayList<>();
-					originalParams.add(original);
-					
-					updateAndRunTest(lineNo, executorDirectory, originalParams, 0, br, threshold, 0);
-
 				}
 				
-			}
-			
-			// parse generated mutation files
-			Iterator it2 = closestGeneratedInputs.entrySet().iterator();
-			
-			// iterate over each parameter (will only be multiple iterations if multiple parameters)
-			int param_num = 0; 
-			
-			while (it.hasNext()) {
+				// parse generated mutation files
+				Iterator it2 = closestGeneratedInputs.entrySet().iterator();
 				
-				Map.Entry<String, List<String>> pair = (Map.Entry<String, List<String>>) it.next();
+				// iterate over each parameter (will only be multiple iterations if multiple parameters)
+				int param_num = 0; 
 				
-				List<String> genParams = pair.getValue();
-				
-				for (int i=0; i<genParams.size(); i++) {
-					String fileId = Integer.toString(i);
+				while (it.hasNext()) {
 					
-					File generated_fuzzed = new File("/Users/bjohnson/Documents/oxy-workspace/fuzzers/fuzzer_results_generated_" + param_num + "_" + fileId);
+					Map.Entry<String, List<String>> pair = (Map.Entry<String, List<String>>) it.next();
 					
-					if (generated_fuzzed.exists()) {
-						BufferedReader br = new BufferedReader(new FileReader(generated_fuzzed));
+					List<String> genParams = pair.getValue();
+					
+					for (int i=0; i<genParams.size(); i++) {
+						String fileId = Integer.toString(i);
 						
-						String line = "";
-						int threshold = 4;
-						int distance = 0;
-						int paramPlace = i;
+						File generated_fuzzed = new File(workingDirectory.getPath() + "/fuzzers/fuzzer_results_generated_" + param_num + "_" + fileId);
 						
-						updateAndRunTest(lineNo, executorDirectory, genParams, i, br, threshold, paramPlace);
+						if (generated_fuzzed.exists()) {
+							BufferedReader br = new BufferedReader(new FileReader(generated_fuzzed));
+							
+							String line = "";
+							int threshold = 4;
+							int distance = 0;
+							int paramPlace = i;
+							
+							updateAndRunTest(lineNo, executorDirectory, genParams, i, br, threshold, paramPlace);
+						}
 					}
+					
+					param_num++;
+					
 				}
-				
-				param_num++;
-				
-			}
 
-		
-			writeOutputFile();
 			
-		} catch (JavaModelException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} 
-//		catch (ExecuteException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		} 		 
-		catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (BadLocationException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (InterruptedException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+				writeOutputFile();
+				
+			} catch (JavaModelException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}	catch (FileNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (BadLocationException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+		} else {
+			System.out.println("No java projects found!");
 		}
+			 
+		
 		
 
 				
@@ -901,67 +907,73 @@ public class RunHolmes implements IEditorActionDelegate {
 			
 		} else {
 			// handle each primitive type / simple expression accordingly
-			Expression oldParam = (Expression) currentParam;
 			
-			if (isValidNumber(param.toString())) {
-				NumberLiteral newParam = ast.newNumberLiteral();
+			if (currentParam instanceof VariableDeclarationFragment) {
 				
-				newParam.setToken(param.toString());				
+			} else {
+				Expression oldParam = (Expression) currentParam;
 				
-				rewrite.replace(oldParam, newParam, null);
-				
-			} else if (param.toString().startsWith("-")) {
-				PrefixExpression newParam = ast.newPrefixExpression();
-				
-				newParam.setOperator(Operator.MINUS);
-				
-				if (isValidNumber(oldParam.toString())) {
-					NumberLiteral num = ast.newNumberLiteral();
-					String paramWithSign = param.toString();
-					String paramWOSign = paramWithSign.substring(1, paramWithSign.length());
+				if (isValidNumber(param.toString())) {
+					NumberLiteral newParam = ast.newNumberLiteral();
 					
-					num.setToken(paramWOSign);
-					
-					newParam.setOperand(num);
+					newParam.setToken(param.toString());				
 					
 					rewrite.replace(oldParam, newParam, null);
-				}
-				
-			} else if (param.toString().startsWith("(") && param.toString().endsWith(")")) {
-				ParenthesizedExpression newParam = ast.newParenthesizedExpression();
-				
-				if (isValidNumber(oldParam.toString())) {
-					NumberLiteral num = ast.newNumberLiteral();
-					String paramWithParens = param.toString();
-					String paramWOParens = paramWithParens.substring(1,paramWithParens.length()-1);
 					
-					num.setToken(paramWOParens);
+				} else if (param.toString().startsWith("-")) {
+					PrefixExpression newParam = ast.newPrefixExpression();
 					
-					rewrite.replace(oldParam, newParam, null);
-				}
-				
-			} else if (currentParam instanceof StringLiteral){
-				StringLiteral newParam = ast.newStringLiteral();
+					newParam.setOperator(Operator.MINUS);
+					
+					if (isValidNumber(oldParam.toString())) {
+						NumberLiteral num = ast.newNumberLiteral();
+						String paramWithSign = param.toString();
+						String paramWOSign = paramWithSign.substring(1, paramWithSign.length());
+						
+						num.setToken(paramWOSign);
+						
+						newParam.setOperand(num);
+						
+						rewrite.replace(oldParam, newParam, null);
+					}
+					
+				} else if (param.toString().startsWith("(") && param.toString().endsWith(")")) {
+					ParenthesizedExpression newParam = ast.newParenthesizedExpression();
+					
+					if (isValidNumber(oldParam.toString())) {
+						NumberLiteral num = ast.newNumberLiteral();
+						String paramWithParens = param.toString();
+						String paramWOParens = paramWithParens.substring(1,paramWithParens.length()-1);
+						
+						num.setToken(paramWOParens);
+						
+						rewrite.replace(oldParam, newParam, null);
+					}
+					
+				} else if (currentParam instanceof StringLiteral){
+					StringLiteral newParam = ast.newStringLiteral();
 
-				newParam.setLiteralValue(param.toString());								
-				
-				rewrite.replace(oldParam, newParam, null);	
-			} else if (currentParam instanceof BooleanLiteral) {
-				BooleanLiteral newParam;
-				
-				if ((boolean) currentParam) {
-					newParam = ast.newBooleanLiteral(false);
-				} else {
-					newParam = ast.newBooleanLiteral(true);
+					newParam.setLiteralValue(param.toString());								
+					
+					rewrite.replace(oldParam, newParam, null);	
+				} else if (currentParam instanceof BooleanLiteral) {
+					BooleanLiteral newParam;
+					
+					if ((boolean) currentParam) {
+						newParam = ast.newBooleanLiteral(false);
+					} else {
+						newParam = ast.newBooleanLiteral(true);
+					}
+					
+				} else if (currentParam instanceof CharacterLiteral && param.toString().length() == 1) {
+					CharacterLiteral newParam = ast.newCharacterLiteral();
+					
+					newParam.setCharValue((char)param);
+					
+					rewrite.replace(oldParam, newParam, null);
 				}
-				
-			} else if (currentParam instanceof CharacterLiteral && param.toString().length() == 1) {
-				CharacterLiteral newParam = ast.newCharacterLiteral();
-				
-				newParam.setCharValue((char)param);
-				
-				rewrite.replace(oldParam, newParam, null);
 			}
+			
 			
 		}
 
@@ -1787,7 +1799,7 @@ public class RunHolmes implements IEditorActionDelegate {
 	
 	
 	private void d4jCompile(File executorDirectory) throws ExecuteException, IOException {
-		CommandLine d4j_compile_cmdLine = new CommandLine("/Users/bjohnson/Documents/Research_2017-2018/defects4j/framework/bin/defects4j");
+		CommandLine d4j_compile_cmdLine = new CommandLine(workingDirectory.getPath()+"/defects4j/framework/bin/defects4j");
 		d4j_compile_cmdLine.addArgument("compile");
 		
 		DefaultExecutor d4j_compile_executor = new DefaultExecutor();		
@@ -1809,7 +1821,7 @@ public class RunHolmes implements IEditorActionDelegate {
 		ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 		PumpStreamHandler streamHandler = new PumpStreamHandler(outputStream);
 		
-		CommandLine d4j_test_cmdLine = new CommandLine("/Users/bjohnson/Documents/Research_2017-2018/defects4j/framework/bin/defects4j");
+		CommandLine d4j_test_cmdLine = new CommandLine(workingDirectory.getPath()+"/defects4j/framework/bin/defects4j");
 		d4j_test_cmdLine.addArgument("test");
 		d4j_test_cmdLine.addArgument("-t");
 		
@@ -1900,23 +1912,74 @@ public class RunHolmes implements IEditorActionDelegate {
 	}
 
 	private void runFuzzers(String cmdLineArg, boolean originalInput, String fileID) throws ExecuteException, IOException {
-		DefaultExecutor py_executor = new DefaultExecutor();
-		py_executor.setWorkingDirectory(new File("/Users/bjohnson/Documents/oxy-workspace/fuzzers/"));
-
-		CommandLine py_fuzzer = new CommandLine("./fuzz.sh");
-//		py_lower_cmdLine.addArgument("fuzz-lowercase.py");
-		py_fuzzer.addArgument(cmdLineArg);
-//		py_lower_cmdLine.addArgument(">");
+		String peachFuzz1Dir = workingDirectory.getPath()+"/fuzzers/fuzz-lowercase.py";
+		String peachFuzz2Dir = workingDirectory.getPath()+"/fuzzers/fuzz-uppercase.py";
+		String fuzzerDir = workingDirectory.getPath() +"/fuzzers/fuzzer-test.js";
 		
-		// pipe output to files for parsing
+		String filename = "";
 		if (originalInput) {
-			py_fuzzer.addArgument("fuzzer_results_original_" + fileID + ".txt");
+			filename = workingDirectory.getPath() + "/fuzzers/fuzzer_results_original_" + fileID + ".txt";
 		} else {
-			py_fuzzer.addArgument("fuzzer_results_generated_" + fileID +".txt");
+			filename = workingDirectory.getPath() + "/fuzzers/fuzzer_results_generated_" + fileID +".txt";
 		}
-
-		py_executor.execute(py_fuzzer);
-		System.out.println("Success!");
+		
+		PumpStreamHandler streamHandler = new PumpStreamHandler(new FileOutputStream(new File(filename)));		
+		
+		CommandLine py_lowercase_fuzzer = new CommandLine(workingDirectory.getPath()+"/fuzzers/Util/anaconda/bin/python");
+		
+		DefaultExecutor py_executor = new DefaultExecutor();
+		py_executor.setWorkingDirectory(new File(workingDirectory.getPath()+ "/fuzzers/"));
+		py_executor.setStreamHandler(streamHandler);
+		
+		py_lowercase_fuzzer.addArgument(peachFuzz1Dir);
+		py_lowercase_fuzzer.addArgument(cmdLineArg);
+//		py_lowercase_fuzzer.addArgument(">");
+//
+//		// pipe output to files for parsing
+//		if (originalInput) {
+//			py_lowercase_fuzzer.addArgument("fuzzer_results_original_" + fileID + ".txt");
+//		} else {
+//			py_lowercase_fuzzer.addArgument("fuzzer_results_generated_" + fileID +".txt");
+//		}
+		
+		py_executor.execute(py_lowercase_fuzzer);
+		System.out.println("Peach fuzzer 1 success!");
+		
+		CommandLine py_uppercase_fuzzer = new CommandLine(workingDirectory.getPath()+"/fuzzers/Util/anaconda/bin/python");
+		py_uppercase_fuzzer.addArgument(peachFuzz2Dir);
+		py_uppercase_fuzzer.addArgument(cmdLineArg);
+//		py_uppercase_fuzzer.addArgument(">>");
+//		
+//		// pipe output to files for parsing
+//		if (originalInput) {
+//			py_uppercase_fuzzer.addArgument("fuzzer_results_original_" + fileID + ".txt");
+//		} else {
+//			py_uppercase_fuzzer.addArgument("fuzzer_results_generated_" + fileID +".txt");
+//		}
+		
+		py_executor.execute(py_uppercase_fuzzer);
+		System.out.println("Peach fuzzer 2 success!");
+		
+		DefaultExecutor js_executor = new DefaultExecutor();
+		js_executor.setWorkingDirectory(new File(workingDirectory.getPath()+"/fuzzers/"));
+		js_executor.setStreamHandler(streamHandler);
+		
+		CommandLine js_fuzzer = new CommandLine(workingDirectory.getPath()+"/fuzzers/Util/node");
+		js_fuzzer.addArgument(fuzzerDir);
+		js_fuzzer.addArgument(cmdLineArg);
+//		js_fuzzer.addArgument(">>");
+//		
+//		// pipe output to files for parsing
+//		if (originalInput) {
+//			js_fuzzer.addArgument("fuzzer_results_original_" + fileID + ".txt");
+//		} else {
+//			js_fuzzer.addArgument("fuzzer_results_generated_" + fileID +".txt");
+//		}
+		
+		js_executor.execute(js_fuzzer);
+		System.out.println("JS fuzzer success!");
+		
+		
 	}
 	
 	private void parseOtherMutations() throws FileNotFoundException, IOException {
@@ -2005,11 +2068,13 @@ public class RunHolmes implements IEditorActionDelegate {
 		
 		MethodInvocation testMethodInvoc = visitor.getFullMethod();
 		
-		if (visitor.getTestStatements() == null) {			
-			targetTest.setFullTest(visitor.getFullTest());
-		} else {
-			targetTest.setFullTest(visitor.getTestStatements());
-		}
+		targetTest.setFullTest(visitor.getFullTest());
+		
+//		if (visitor.getTestStatements() == null) {			
+//			targetTest.setFullTest(visitor.getFullTest());
+//		} else {
+//			targetTest.setFullTest(visitor.getTestStatements());
+//		}
 		
 		targetTest.setTestMethod(visitor.getTargetTestMethod());
 		

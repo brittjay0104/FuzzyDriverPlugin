@@ -8,6 +8,7 @@ import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Assignment;
+import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.BooleanLiteral;
 import org.eclipse.jdt.core.dom.CharacterLiteral;
 import org.eclipse.jdt.core.dom.CompilationUnit;
@@ -158,9 +159,9 @@ public class TestMethodVisitor extends ASTVisitor {
 						
 						if (nextAssignVariable.equals(nameParamOfInterest.toString())) {
 							if (originalTest) {
-								originalFullTest = findFullTest(node).toString();
+								originalFullTest = findFullTestExpression(node).toString();
 							}
-							fullTest = findFullTest(node).toString();
+							fullTest = findFullTestExpression(node).toString();
 							// add assignment to list of parameters
 							paramsOfInterest.add(nextAssign);
 						} 
@@ -195,10 +196,10 @@ public class TestMethodVisitor extends ASTVisitor {
 		}
 		
 		if (originalTest) {
-			originalFullTest = findFullTest(node).toString();
+			originalFullTest = findFullTestExpression(node).toString();
 		}
 		
-		fullTest = findFullTest(node).toString();
+		fullTest = findFullTestExpression(node).toString();
 		
 		StringBuffer sb = new StringBuffer();
 		
@@ -228,10 +229,10 @@ public class TestMethodVisitor extends ASTVisitor {
 					String nextAssignVariable = nextAssign.getLeftHandSide().toString();
 					if (nextAssignVariable.equals(nameParamOfInterest.toString())) {
 						if (originalTest) {
-							originalFullTest = findFullTest(node).toString();
+							originalFullTest = findFullTestExpression(node).toString();
 						}
 						
-						fullTest = findFullTest(node).toString();
+						fullTest = findFullTestExpression(node).toString();
 						assignOfInterest = nextAssign;
 						testStatements = assignOfInterest + "\n" + fullTest;
 					} 
@@ -243,12 +244,22 @@ public class TestMethodVisitor extends ASTVisitor {
 					for (VariableDeclarationFragment frag: declFragments) {
 						if (frag.getName().toString().equals(nameParamOfInterest.toString())) {
 							if (originalTest) {
-								originalFullTest = findFullTest(node).toString();
+								if (findFullTestExpression(node) != null) {
+									originalFullTest = findFullTestExpression(node).toString();									
+								} else {
+									Block parentBlock = getParentBlock(node);
+									originalFullTest = parentBlock.toString().replace("}", "").replace("{", "");
+								}
 							}
 							
-							fullTest = findFullTest(node).toString();
+							if (findFullTestExpression(node) != null) {
+								fullTest = findFullTestExpression(node).toString();								
+							} else {
+								Block parentBlock = getParentBlock(node);
+								fullTest = parentBlock.toString().replace("}", "").replace("{", "");
+							}
 							fragOfInterest = frag;	
-							testStatements = fragOfInterest + "\n" + fullTest;
+//							testStatements = fragOfInterest + "\n" + fullTest;							
 						}
 					}					
 				}
@@ -256,7 +267,7 @@ public class TestMethodVisitor extends ASTVisitor {
 
 		} else {
 			// if hardcoded value, get just gather test statement
-			ExpressionStatement fullTest = findFullTest(node);
+			ExpressionStatement fullTest = findFullTestExpression(node);
 			
 			if (fullTest != null) {
 				if (originalTest) {
@@ -295,9 +306,17 @@ public class TestMethodVisitor extends ASTVisitor {
 		}
 	}
 	
-	private ExpressionStatement findFullTest(ASTNode node) {
+	private ExpressionStatement findFullTestExpression(ASTNode node) {
 		if (node.getParent() != null) {
-			return node instanceof ExpressionStatement ? (ExpressionStatement)node : findFullTest(node.getParent());
+			return node instanceof ExpressionStatement ? (ExpressionStatement)node : findFullTestExpression(node.getParent());
+		}
+		
+		return null;
+	}
+	
+	private Block getParentBlock(ASTNode node) {
+		if (node.getParent() != null) {
+			return node instanceof Block ? (Block)node : getParentBlock(node.getParent());
 		}
 		
 		return null;

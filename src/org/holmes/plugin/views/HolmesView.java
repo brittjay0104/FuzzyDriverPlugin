@@ -10,6 +10,9 @@ import java.net.URL;
 import java.util.concurrent.TimeUnit;
 
 import org.eclipse.core.resources.IFile;
+import org.eclipse.core.resources.IProject;
+import org.eclipse.jdt.core.IJavaProject;
+import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jface.viewers.ITableLabelProvider;
 import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.swt.SWT;
@@ -25,6 +28,7 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.ui.IEditorInput;
 import org.eclipse.ui.IEditorPart;
+import org.eclipse.ui.IFileEditorInput;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
@@ -38,6 +42,7 @@ public class HolmesView extends ViewPart {
 	Browser browser;
     String browserId;
     volatile boolean allowUrlChange;
+    
     
 	public static class ViewLabelProvider extends LabelProvider implements ITableLabelProvider {
 		public String getColumnText(Object obj, int index) {
@@ -82,22 +87,18 @@ public class HolmesView extends ViewPart {
 	
 	public void updateView() {
 		IEditorPart editor = PlatformUI.getWorkbench().getActiveWorkbenchWindow().getActivePage().getActiveEditor();
-		String projectName=""; 
+		String projectName="";
 		
-		if (editor != null) {
-			// TODO: get project
-			IEditorInput editorInput = editor.getEditorInput();
-			IFile file = (IFile) editorInput.getAdapter(IFile.class);
-			
-		if (file != null) {
-			projectName = file.getProject().getName();	
-		}
+		IEditorInput input = editor.getEditorInput();
+		IFile file = ((IFileEditorInput)input).getFile();
+		
+		String projectDirectory = file.getProject().getRawLocation().toPortableString();
+		
+		File workingDirectory = new File (projectDirectory.substring(0, projectDirectory.indexOf(file.getProject().getName())));
+		
+		projectName = file.getProject().getName();
+		
 				
-
-//	
-
-		}
-		
 		StringBuffer html = new StringBuffer();
 		
 		html.append("<head>");
@@ -113,9 +114,9 @@ public class HolmesView extends ViewPart {
 		 html.append("<body style=\"background-color:white;\"><hr>");
 		 
 		
-		File originalOutput = new File("/Users/bjohnson/Documents/oxy-workspace/holmes-output-original.txt");
-		File passingOutput = new File("/Users/bjohnson/Documents/oxy-workspace/holmes-output-passing.txt");
-		File failingOutput = new File("/Users/bjohnson/Documents/oxy-workspace/holmes-output-failing.txt");
+		File originalOutput = new File(workingDirectory.getPath()+"/holmes-output-original.txt");
+		File passingOutput = new File(workingDirectory.getPath() + "/holmes-output-passing.txt");
+		File failingOutput = new File(workingDirectory.getPath() + "/holmes-output-failing.txt");
 		
 		if (originalOutput.exists()) {
 			try {
@@ -136,7 +137,7 @@ public class HolmesView extends ViewPart {
 				
 				html.append("<h2> Original Failing Test</h2>");
 				html.append("<font face='Monaco' size='2'>"+oTest+"</font>");
-				html.append("<br>");
+//				html.append("<br>");
 //				html.append("<button onclick=\"myFunction()\">See Execution Trace</button>");
 //				html.append("<div id=\"original\" style=\"display:none\">\n");
 //				html.append(oTrace);
@@ -194,9 +195,9 @@ public class HolmesView extends ViewPart {
 					if (lastIndexPassing != -1) {
 						test = passingTests.substring(lastIndexPassing+2);
 						html.append("<font face='Monaco' size='2'>" +test+"</font>");
-						html.append("<br>");
+//						html.append("<br>");
 						
-						lastIndexPassing += findStr.length();
+						lastIndexPassing += test.length();
 						
 						int nextIndex = passingTests.indexOf(findStr, lastIndexPassing);
 						
@@ -275,7 +276,7 @@ public class HolmesView extends ViewPart {
 					if (lastIndexFailing != -1) {
 						test = failingTests.substring(lastIndexFailing+2);
 						html.append("<font face='Monaco' size='2'>" +test+"</font>");
-						html.append("<br>");
+//						html.append("<br>");
 						
 						lastIndexFailing += test.length();
 						
